@@ -35,29 +35,66 @@ func doParse(ref reflect.Value, processField processFieldFn, opts Options) error
 }
 
 func doParseField(refField reflect.Value, refTypeField reflect.StructField, processField processFieldFn, opts Options) error {
+	if !refField.CanSet() {
+		return nil
+	}
+
 	params, err := parseFieldParams(refTypeField, opts)
 	if err != nil {
 		return err
 	}
 
-	return processField(refField, refTypeField, opts, params)
+	if err := processField(refField, refTypeField, opts, params); err != nil {
+		return err
+	}
+	if refField.Kind() == reflect.Struct {
+		return doParse(refField, processField, optionsWithEnvPrefix(refTypeField, opts))
+	}
+
+	return nil
 }
 
 func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, error) {
 	ownKey, _ := parseKeyForOption(field.Tag.Get(opts.TagName))
+	defaultValue, hasDefaultValue := field.Tag.Lookup(opts.DefaultValueTagName)
 	result := FieldParams{
-		Key: ownKey,
+		Key:             opts.Prefix + ownKey,
+		DefaultValue:    defaultValue,
+		HasDefaultValue: hasDefaultValue,
 	}
 
 	return result, nil
 }
 
 func setField(refField reflect.Value, refTypeField reflect.StructField, opts Options, fieldParams FieldParams) error {
-	value, ok := opts.Environment[fieldParams.Key]
-	if ok && value != "" {
+	value, err := get(fieldParams, opts)
+	if err != nil {
+		return err
+	}
+	if value != "" {
 		return set(refField, refTypeField, value, opts.FuncMap)
 	}
 	return nil
+}
+
+func get(fieldParams FieldParams, opts Options) (val string, err error) {
+	value, exists, isDefault := getOr(fieldParams.Key, fieldParams.DefaultValue, fieldParams.HasDefaultValue, opts.Environment)
+	if isDefault {
+	}
+	if exists {
+	}
+	return value, nil
+}
+
+func getOr(key, defaultValue string, defExists bool, env map[string]string) (val string, exists bool, isDefault bool) {
+	value, exists := env[key]
+	switch {
+	case (!exists || key == "") && defExists:
+		return defaultValue, true, true
+	case !exists:
+		return "", false, false
+	}
+	return value, true, false
 }
 
 func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[reflect.Type]ParserFunc) error {
@@ -87,7 +124,11 @@ func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[
 }
 
 func handleSlice(field reflect.Value, value string, sf reflect.StructField, funcMap map[reflect.Type]ParserFunc) error {
-	parts := strings.Split(value, ",")
+	separator := sf.Tag.Get("envSeparator")
+	if separator == "" {
+		separator = ","
+	}
+	parts := strings.Split(value, separator)
 	typee := sf.Type.Elem()
 	if typee.Kind() == reflect.Ptr {
 		typee = typee.Elem()

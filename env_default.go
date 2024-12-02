@@ -10,16 +10,32 @@ import (
 )
 
 type Options struct {
-	Environment map[string]string
-	TagName     string
-	FuncMap     map[reflect.Type]ParserFunc
+	Environment         map[string]string
+	TagName             string
+	DefaultValueTagName string
+	PrefixTagName       string
+	Prefix              string
+	FuncMap             map[reflect.Type]ParserFunc
 }
 
 func defaultOptions() Options {
 	return Options{
-		TagName:     "env",
-		Environment: toMap(os.Environ()),
-		FuncMap:     defaultTypeParsers(),
+		TagName:             "env",
+		DefaultValueTagName: "envDefault",
+		PrefixTagName:       "envPrefix",
+		Environment:         toMap(os.Environ()),
+		FuncMap:             defaultTypeParsers(),
+	}
+}
+
+func optionsWithEnvPrefix(field reflect.StructField, opts Options) Options {
+	return Options{
+		Environment:         opts.Environment,
+		TagName:             opts.TagName,
+		PrefixTagName:       opts.PrefixTagName,
+		Prefix:              opts.Prefix + field.Tag.Get(opts.PrefixTagName),
+		DefaultValueTagName: opts.DefaultValueTagName,
+		FuncMap:             opts.FuncMap,
 	}
 }
 

@@ -95,6 +95,20 @@ type Config struct {
 	URLs    []url.URL  `env:"URLS"`
 	URLPtrs []*url.URL `env:"URLS"`
 
+	StringWithDefault string `env:"DATABASE_URL" envDefault:"postgres://localhost:5432/db"`
+
+	CustomSeparator []string `env:"SEPSTRINGS" envSeparator:":"`
+
+	NonDefined struct {
+		String string `env:"NONDEFINED_STR"`
+	}
+
+	NestedNonDefined struct {
+		NonDefined struct {
+			String string `env:"STR"`
+		} `envPrefix:"NONDEFINED_"`
+	} `envPrefix:"PRF_"`
+
 	NotAnEnv   string
 	unexported string `env:"FOO"`
 }
@@ -188,7 +202,8 @@ func TestParsesEnv(t *testing.T) {
 	t.Setenv("DURATIONS", toss(duration1, duration2))
 
 	location1 := time.UTC
-	location2, _ := time.LoadLocation("Europe/Berlin")
+	location2, errLoadLocation := time.LoadLocation("Europe/Berlin")
+	isNoErr(t, errLoadLocation)
 	t.Setenv("LOCATION", tos(location1))
 	t.Setenv("LOCATIONS", toss(location1, location2))
 
@@ -197,15 +212,14 @@ func TestParsesEnv(t *testing.T) {
 	t.Setenv("URL", tos(url1))
 	t.Setenv("URLS", toss(url1, url2))
 
-	t.Setenv("SEPSTRINGS", strings.Join([]string{str1, str2}, ":"))
+	t.Setenv("SEPSTRINGS", str1+":"+str2)
 
 	nonDefinedStr := "nonDefinedStr"
 	t.Setenv("NONDEFINED_STR", nonDefinedStr)
 	t.Setenv("PRF_NONDEFINED_STR", nonDefinedStr)
 
 	cfg := Config{}
-
-	_ = Parse(&cfg)
+	isNoErr(t, Parse(&cfg))
 
 	isEqual(t, str1, cfg.String)
 	isEqual(t, &str1, cfg.StringPtr)
@@ -324,6 +338,13 @@ func TestParsesEnv(t *testing.T) {
 	isEqual(t, url2, cfg.URLs[1].String())
 	isEqual(t, url1, cfg.URLPtrs[0].String())
 	isEqual(t, url2, cfg.URLPtrs[1].String())
+
+	isEqual(t, "postgres://localhost:5432/db", cfg.StringWithDefault)
+	isEqual(t, nonDefinedStr, cfg.NonDefined.String)
+	isEqual(t, nonDefinedStr, cfg.NestedNonDefined.NonDefined.String)
+
+	isEqual(t, str1, cfg.CustomSeparator[0])
+	isEqual(t, str2, cfg.CustomSeparator[1])
 
 	isEqual(t, cfg.NotAnEnv, "")
 
