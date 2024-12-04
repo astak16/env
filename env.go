@@ -1,6 +1,7 @@
 package env
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -29,7 +30,12 @@ func doParse(ref reflect.Value, processField processFieldFn, opts Options) error
 		refField := ref.Field(i)
 		refTypeField := refType.Field(i)
 		if err := doParseField(refField, refTypeField, processField, opts); err != nil {
-			agrErr.Errors = append(agrErr.Errors, err)
+			var val AggregateError
+			if errors.As(err, &val) {
+				agrErr.Errors = append(agrErr.Errors, val.Errors...)
+			} else {
+				agrErr.Errors = append(agrErr.Errors, err)
+			}
 		}
 	}
 	if len(agrErr.Errors) == 0 {
@@ -74,6 +80,8 @@ func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, err
 			continue
 		case "required":
 			result.Required = true
+		case "notEmpty":
+			result.NotEmpty = true
 		}
 	}
 	return result, nil
@@ -95,6 +103,9 @@ func get(fieldParams FieldParams, opts Options) (val string, err error) {
 
 	if fieldParams.Required && !exists {
 		return "", newVarIsNotSetError(fieldParams.Key)
+	}
+	if fieldParams.NotEmpty && value == "" {
+		return "", newEmptyVarError(fieldParams.Key)
 	}
 	if isDefault {
 	}
@@ -125,7 +136,7 @@ func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[
 	if ok {
 		val, err := parserFunc(value)
 		if err != nil {
-			return nil
+			return newParseError(sf, err)
 		}
 		fieldee.Set(reflect.ValueOf(val).Convert(typee))
 		return nil

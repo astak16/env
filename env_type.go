@@ -11,4 +11,5 @@ type FieldParams struct {
 	DefaultValue    string
 	HasDefaultValue bool
 	Required        bool
+	NotEmpty        bool
 }

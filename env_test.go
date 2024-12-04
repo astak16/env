@@ -219,6 +219,8 @@ func TestParsesEnv(t *testing.T) {
 	t.Setenv("NONDEFINED_STR", nonDefinedStr)
 	t.Setenv("PRF_NONDEFINED_STR", nonDefinedStr)
 
+	t.Setenv("FOO", str1)
+
 	cfg := Config{}
 	isNoErr(t, Parse(&cfg))
 
@@ -424,6 +426,60 @@ func TestNoErrorRequiredSet(t *testing.T) {
 	t.Setenv("IS_REQUIRED", "")
 	isNoErr(t, Parse(cfg))
 	isEqual(t, "", cfg.IsRequired)
+}
+
+func TestNoErrorRequiredAndNotEmptySet(t *testing.T) {
+	t.Setenv("IS_REQUIRED", "1")
+	type config struct {
+		IsRequired string `env:"IS_REQUIRED,required,notEmpty"`
+	}
+	isNoErr(t, Parse(&config{}))
+}
+
+func TestNoErrorNotEmptySet(t *testing.T) {
+	t.Setenv("IS_REQUIRED", "1")
+	type config struct {
+		IsRequired string `env:"IS_REQUIRED,notEmpty"`
+	}
+	isNoErr(t, Parse(&config{}))
+}
+
+func TestErrorNotEmptySet(t *testing.T) {
+	t.Setenv("IS_REQUIRED", "")
+	type config struct {
+		IsRequired string `env:"IS_REQUIRED,notEmpty"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: environment variable "IS_REQUIRED" should not be empty`)
+	isTrue(t, errors.Is(err, EmptyVarError{}))
+}
+
+func TestErrorRequiredAndNotEmptySet(t *testing.T) {
+	t.Setenv("IS_REQUIRED", "")
+	type config struct {
+		IsRequired string `env:"IS_REQUIRED,required,notEmpty"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: environment variable "IS_REQUIRED" should not be empty`)
+	isTrue(t, errors.Is(err, EmptyVarError{}))
+}
+
+func TestParsesEnvInnerFailsMultipleErrors(t *testing.T) {
+	type config struct {
+		Foo struct {
+			Name   string `env:"NAME,required"`
+			Number int    `env:"NUMBER"`
+			Bar    struct {
+				Age int `env:"AGE,required"`
+			}
+		}
+	}
+	t.Setenv("NUMBER", "not-a-number")
+	c := &config{}
+	err := Parse(c)
+	isErrorWithMessage(t, err, `env: required environment variable "NAME" is not set; parse error on field "Number" of type "int": strconv.ParseInt: parsing "not-a-number": invalid syntax; required environment variable "AGE" is not set`)
+	isTrue(t, errors.Is(err, ParseError{}))
+	isTrue(t, errors.Is(err, VarIsNotSetError{}))
 }
 
 func isEqual(tb testing.TB, a, b interface{}) {

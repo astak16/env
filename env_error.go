@@ -67,3 +67,15 @@ func newVarIsNotSetError(key string) error {
 func (e VarIsNotSetError) Error() string {
 	return fmt.Sprintf(`required environment variable %q is not set`, e.Key)
 }
+
+type EmptyVarError struct {
+	Key string
+}
+
+func newEmptyVarError(key string) error {
+	return EmptyVarError{key}
+}
+
+func (e EmptyVarError) Error() string {
+	return fmt.Sprintf("environment variable %q should not be empty", e.Key)
+}
