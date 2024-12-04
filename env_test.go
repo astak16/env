@@ -1,6 +1,7 @@
 package env
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"reflect"
@@ -351,6 +352,80 @@ func TestParsesEnv(t *testing.T) {
 	isEqual(t, cfg.unexported, "")
 }
 
+func TestParsesEnv_Map(t *testing.T) {
+	type config struct {
+		MapStringString                map[string]string `env:"MAP_STRING_STRING" envSeparator:","`
+		MapStringInt64                 map[string]int64  `env:"MAP_STRING_INT64"`
+		MapStringBool                  map[string]bool   `env:"MAP_STRING_BOOL" envSeparator:";"`
+		CustomSeparatorMapStringString map[string]string `env:"CUSTOM_SEPARATOR_MAP_STRING_STRING" envSeparator:"," envKeyValSeparator:"|"`
+	}
+
+	mss := map[string]string{
+		"k1": "v1",
+		"k2": "v2",
+	}
+	t.Setenv("MAP_STRING_STRING", "k1:v1,k2:v2")
+
+	msi := map[string]int64{
+		"k1": 1,
+		"k2": 2,
+	}
+	t.Setenv("MAP_STRING_INT64", "k1:1,k2:2")
+
+	msb := map[string]bool{
+		"k1": true,
+		"k2": false,
+	}
+	t.Setenv("MAP_STRING_BOOL", "k1:true;k2:false")
+
+	withCustomSeparator := map[string]string{
+		"k1": "v1",
+		"k2": "v2",
+	}
+	t.Setenv("CUSTOM_SEPARATOR_MAP_STRING_STRING", "k1|v1,k2|v2")
+
+	var cfg config
+	isNoErr(t, Parse(&cfg))
+
+	isEqual(t, mss, cfg.MapStringString)
+	isEqual(t, msi, cfg.MapStringInt64)
+	isEqual(t, msb, cfg.MapStringBool)
+	isEqual(t, withCustomSeparator, cfg.CustomSeparatorMapStringString)
+}
+
+func TestParsesEnvInvalidMap(t *testing.T) {
+	type config struct {
+		MapStringString map[string]string `env:"MAP_STRING_STRING" envSeparator:","`
+	}
+
+	t.Setenv("MAP_STRING_STRING", "k1,k2:v2")
+
+	var cfg config
+	err := Parse(&cfg)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestErrorRequiredNotSet(t *testing.T) {
+	type config struct {
+		IsRequired string `env:"IS_REQUIRED,required"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: required environment variable "IS_REQUIRED" is not set`)
+	isTrue(t, errors.Is(err, VarIsNotSetError{}))
+}
+
+func TestNoErrorRequiredSet(t *testing.T) {
+	type config struct {
+		IsRequired string `env:"IS_REQUIRED,required"`
+	}
+
+	cfg := &config{}
+
+	t.Setenv("IS_REQUIRED", "")
+	isNoErr(t, Parse(cfg))
+	isEqual(t, "", cfg.IsRequired)
+}
+
 func isEqual(tb testing.TB, a, b interface{}) {
 	tb.Helper()
 
@@ -394,5 +469,25 @@ func isNoErr(tb testing.TB, err error) {
 
 	if err != nil {
 		tb.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func isTrue(tb testing.TB, b bool) {
+	tb.Helper()
+
+	if !b {
+		tb.Fatalf("expected true, got false")
+	}
+}
+
+func isErrorWithMessage(tb testing.TB, err error, msg string) {
+	tb.Helper()
+
+	if err == nil {
+		tb.Fatalf("expected error, got nil")
+	}
+
+	if msg != err.Error() {
+		tb.Fatalf("expected error message %q, got %q", msg, err.Error())
 	}
 }
