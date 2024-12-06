@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -577,6 +578,24 @@ func TestParseExpandWithDefaultOption(t *testing.T) {
 	isEqual(t, "jhon@localhost:5000", cfg.MixedDefault)
 	isEqual(t, "msg: this is used instead", cfg.OverrideDefault)
 	isEqual(t, "3000:5000", cfg.NoDefault)
+}
+
+func TestParseUnsetRequireOptions(t *testing.T) {
+	type config struct {
+		Password string `env:"PASSWORD,unset,required"`
+	}
+	cfg := config{}
+
+	err := Parse(&cfg)
+	isErrorWithMessage(t, err, `env: required environment variable "PASSWORD" is not set`)
+	isTrue(t, errors.Is(err, VarIsNotSetError{}))
+	t.Setenv("PASSWORD", "superSecret")
+	isNoErr(t, Parse(&cfg))
+
+	isEqual(t, "superSecret", cfg.Password)
+	unset, exists := os.LookupEnv("PASSWORD")
+	isEqual(t, "", unset)
+	isEqual(t, false, exists)
 }
 
 func isEqual(tb testing.TB, a, b interface{}) {

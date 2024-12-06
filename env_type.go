@@ -15,4 +15,5 @@ type FieldParams struct {
 	NotEmpty        bool
 	Init            bool
 	Expand          bool
+	Unset           bool
 }

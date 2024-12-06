@@ -98,6 +98,8 @@ func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, err
 			result.Init = true
 		case "expand":
 			result.Expand = true
+		case "unset":
+			result.Unset = true
 		}
 	}
 	return result, nil
@@ -122,6 +124,10 @@ func get(fieldParams FieldParams, opts Options) (val string, err error) {
 	}
 
 	opts.rawEnvVars[fieldParams.OwnKey] = val
+
+	if fieldParams.Unset {
+		defer os.Unsetenv(fieldParams.Key)
+	}
 
 	if fieldParams.Required && !exists {
 		return "", newVarIsNotSetError(fieldParams.Key)
