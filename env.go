@@ -3,6 +3,7 @@ package env
 import (
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 )
@@ -79,6 +80,7 @@ func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, err
 	ownKey, tags := parseKeyForOption(field.Tag.Get(opts.TagName))
 	defaultValue, hasDefaultValue := field.Tag.Lookup(opts.DefaultValueTagName)
 	result := FieldParams{
+		OwnKey:          ownKey,
 		Key:             opts.Prefix + ownKey,
 		DefaultValue:    defaultValue,
 		HasDefaultValue: hasDefaultValue,
@@ -94,6 +96,8 @@ func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, err
 			result.NotEmpty = true
 		case "init":
 			result.Init = true
+		case "expand":
+			result.Expand = true
 		}
 	}
 	return result, nil
@@ -111,18 +115,24 @@ func setField(refField reflect.Value, refTypeField reflect.StructField, opts Opt
 }
 
 func get(fieldParams FieldParams, opts Options) (val string, err error) {
-	value, exists, isDefault := getOr(fieldParams.Key, fieldParams.DefaultValue, fieldParams.HasDefaultValue, opts.Environment)
+	val, exists, isDefault := getOr(fieldParams.Key, fieldParams.DefaultValue, fieldParams.HasDefaultValue, opts.Environment)
+
+	if fieldParams.Expand {
+		val = os.Expand(val, opts.getRawEnv)
+	}
+
+	opts.rawEnvVars[fieldParams.OwnKey] = val
 
 	if fieldParams.Required && !exists {
 		return "", newVarIsNotSetError(fieldParams.Key)
 	}
-	if fieldParams.NotEmpty && value == "" {
+	if fieldParams.NotEmpty && val == "" {
 		return "", newEmptyVarError(fieldParams.Key)
 	}
 	if isDefault {
 	}
 
-	return value, nil
+	return val, nil
 }
 
 func getOr(key, defaultValue string, defExists bool, env map[string]string) (val string, exists bool, isDefault bool) {

@@ -16,6 +16,15 @@ type Options struct {
 	PrefixTagName       string
 	Prefix              string
 	FuncMap             map[reflect.Type]ParserFunc
+	rawEnvVars          map[string]string
+}
+
+func (opts *Options) getRawEnv(s string) string {
+	val := opts.rawEnvVars[s]
+	if val == "" {
+		val = opts.Environment[s]
+	}
+	return os.Expand(val, opts.getRawEnv)
 }
 
 func defaultOptions() Options {
@@ -25,6 +34,7 @@ func defaultOptions() Options {
 		PrefixTagName:       "envPrefix",
 		Environment:         toMap(os.Environ()),
 		FuncMap:             defaultTypeParsers(),
+		rawEnvVars:          make(map[string]string),
 	}
 }
 
@@ -36,6 +46,7 @@ func optionsWithEnvPrefix(field reflect.StructField, opts Options) Options {
 		Prefix:              opts.Prefix + field.Tag.Get(opts.PrefixTagName),
 		DefaultValueTagName: opts.DefaultValueTagName,
 		FuncMap:             opts.FuncMap,
+		rawEnvVars:          opts.rawEnvVars,
 	}
 }
 
