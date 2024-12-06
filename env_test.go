@@ -482,6 +482,42 @@ func TestParsesEnvInnerFailsMultipleErrors(t *testing.T) {
 	isTrue(t, errors.Is(err, VarIsNotSetError{}))
 }
 
+func TestParsesEnvInner_WhenInnerStructPointerIsNil(t *testing.T) {
+	type InnerStruct struct {
+		Inner  string `env:"innervar"`
+		Number uint   `env:"innernum"`
+	}
+	type ParentStruct struct {
+		InnerStruct *InnerStruct `env:",init"`
+	}
+
+	t.Setenv("innervar", "someinnervalue")
+	t.Setenv("innernum", "8")
+	cfg := ParentStruct{}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, "someinnervalue", cfg.InnerStruct.Inner)
+	isEqual(t, uint(8), cfg.InnerStruct.Number)
+}
+
+func TestParsesEnvInner(t *testing.T) {
+	type InnerStruct struct {
+		Inner  string `env:"innervar"`
+		Number uint   `env:"innernum"`
+	}
+	type ParentStruct struct {
+		InnerStruct *InnerStruct `env:",init"`
+	}
+
+	t.Setenv("innervar", "someinnervalue")
+	t.Setenv("innernum", "8")
+	cfg := ParentStruct{
+		InnerStruct: &InnerStruct{},
+	}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, "someinnervalue", cfg.InnerStruct.Inner)
+	isEqual(t, uint(8), cfg.InnerStruct.Number)
+}
+
 func isEqual(tb testing.TB, a, b interface{}) {
 	tb.Helper()
 

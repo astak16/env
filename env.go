@@ -58,6 +58,16 @@ func doParseField(refField reflect.Value, refTypeField reflect.StructField, proc
 	if err := processField(refField, refTypeField, opts, params); err != nil {
 		return err
 	}
+
+	if params.Init && isInvalidPtr(refField) {
+		refField.Set(reflect.New(refField.Type().Elem()))
+		refField = refField.Elem()
+	}
+
+	if refField.Kind() == reflect.Ptr && refField.Elem().Kind() == reflect.Struct {
+		return doParse(refField.Elem(), processField, optionsWithEnvPrefix(refTypeField, opts))
+	}
+
 	if refField.Kind() == reflect.Struct {
 		return doParse(refField, processField, optionsWithEnvPrefix(refTypeField, opts))
 	}
@@ -82,6 +92,8 @@ func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, err
 			result.Required = true
 		case "notEmpty":
 			result.NotEmpty = true
+		case "init":
+			result.Init = true
 		}
 	}
 	return result, nil
