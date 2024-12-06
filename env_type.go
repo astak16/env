@@ -16,4 +16,5 @@ type FieldParams struct {
 	Init            bool
 	Expand          bool
 	Unset           bool
+	LoadFile        bool
 }

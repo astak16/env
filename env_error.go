@@ -79,3 +79,17 @@ func newEmptyVarError(key string) error {
 func (e EmptyVarError) Error() string {
 	return fmt.Sprintf("environment variable %q should not be empty", e.Key)
 }
+
+type LoadFileContentError struct {
+	Filename string
+	Key      string
+	Err      error
+}
+
+func newLoadFileContentError(filename, key string, err error) error {
+	return LoadFileContentError{filename, key, err}
+}
+
+func (e LoadFileContentError) Error() string {
+	return fmt.Sprintf("could not load content of file %q from variable %s: %v", e.Filename, e.Key, e.Err)
+}

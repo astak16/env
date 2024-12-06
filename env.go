@@ -100,6 +100,8 @@ func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, err
 			result.Expand = true
 		case "unset":
 			result.Unset = true
+		case "file":
+			result.LoadFile = true
 		}
 	}
 	return result, nil
@@ -135,6 +137,15 @@ func get(fieldParams FieldParams, opts Options) (val string, err error) {
 	if fieldParams.NotEmpty && val == "" {
 		return "", newEmptyVarError(fieldParams.Key)
 	}
+
+	if fieldParams.LoadFile && val != "" {
+		filename := val
+		val, err = getFromFile(filename)
+		if err != nil {
+			return "", newLoadFileContentError(filename, fieldParams.Key, err)
+		}
+	}
+
 	if isDefault {
 	}
 

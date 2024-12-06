@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -596,6 +598,76 @@ func TestParseUnsetRequireOptions(t *testing.T) {
 	unset, exists := os.LookupEnv("PASSWORD")
 	isEqual(t, "", unset)
 	isEqual(t, false, exists)
+}
+
+func TestFile(t *testing.T) {
+	type config struct {
+		SecretKey string `env:"SECRET_KEY,file"`
+	}
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "sec_key")
+	isNoErr(t, os.WriteFile(file, []byte("secret"), 0o660))
+
+	t.Setenv("SECRET_KEY", file)
+
+	cfg := config{}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, "secret", cfg.SecretKey)
+}
+
+func TestFileNoParam(t *testing.T) {
+	type config struct {
+		SecretKey string `env:"SECRET_KEY,file"`
+	}
+
+	cfg := config{}
+	err := Parse(&cfg)
+	isNoErr(t, err)
+}
+
+func TestFileNoParamRequired(t *testing.T) {
+	type config struct {
+		SecretKey string `env:"SECRET_KEY,file,required"`
+	}
+
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: required environment variable "SECRET_KEY" is not set`)
+	isTrue(t, errors.Is(err, VarIsNotSetError{}))
+}
+
+func TestFileBadFile(t *testing.T) {
+	type config struct {
+		SecretKey string `env:"SECRET_KEY,file"`
+	}
+
+	filename := "not-a-real-file"
+	t.Setenv("SECRET_KEY", filename)
+
+	oserr := "no such file or directory"
+	if runtime.GOOS == "windows" {
+		oserr = "The system cannot find the file specified."
+	}
+
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, fmt.Sprintf("env: could not load content of file %q from variable SECRET_KEY: open %s: %s", filename, filename, oserr))
+	isTrue(t, errors.Is(err, LoadFileContentError{}))
+}
+
+func TestFileWithDefault(t *testing.T) {
+	type config struct {
+		SecretKey string `env:"SECRET_KEY,file,expand" envDefault:"${FILE}"`
+	}
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "sec_key")
+	isNoErr(t, os.WriteFile(file, []byte("secret"), 0o660))
+
+	t.Setenv("FILE", file)
+
+	cfg := config{}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, "secret", cfg.SecretKey)
 }
 
 func isEqual(tb testing.TB, a, b interface{}) {
