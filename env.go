@@ -60,6 +60,11 @@ func doParseField(refField reflect.Value, refTypeField reflect.StructField, proc
 		return err
 	}
 
+	// 对 isInvalidPtr 说明
+	// type Internal struct{}
+	// type Config struct{ Internal *Internal }
+	// config1 := &Config{}                       isInvalidPtr(refField) == true
+	// config2 := &Config{Internal: &Internal{}}  isInvalidPtr(refField) == false
 	if params.Init && isInvalidPtr(refField) {
 		refField.Set(reflect.New(refField.Type().Elem()))
 		refField = refField.Elem()
