@@ -15,11 +15,11 @@ func Parse(v interface{}) error {
 func parseInternal(v interface{}, processField processFieldFn, opts Options) error {
 	ptrRef := reflect.ValueOf(v)
 	if ptrRef.Kind() != reflect.Ptr {
-		return nil
+		return newAggregateError(NotStructPtrError{})
 	}
 	ref := ptrRef.Elem()
 	if ref.Kind() != reflect.Struct {
-		return nil
+		return newAggregateError(NotStructPtrError{})
 	}
 	return doParse(ref, processField, opts)
 }
@@ -212,7 +212,10 @@ func handleSlice(field reflect.Value, value string, sf reflect.StructField, func
 
 	result := reflect.MakeSlice(sf.Type, 0, len(parts))
 	for _, part := range parts {
-		r, _ := parserFunc(part)
+		r, err := parserFunc(part)
+		if err != nil {
+			return newParseError(sf, err)
+		}
 		v := reflect.ValueOf(r)
 		if sf.Type.Elem().Kind() == reflect.Ptr {
 			v = reflect.New(typee)

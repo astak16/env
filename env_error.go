@@ -93,3 +93,9 @@ func newLoadFileContentError(filename, key string, err error) error {
 func (e LoadFileContentError) Error() string {
 	return fmt.Sprintf("could not load content of file %q from variable %s: %v", e.Filename, e.Key, e.Err)
 }
+
+type NotStructPtrError struct{}
+
+func (e NotStructPtrError) Error() string {
+	return "expected a pointer to a Struct"
+}

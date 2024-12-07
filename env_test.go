@@ -3,6 +3,7 @@ package env
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -115,6 +116,18 @@ type Config struct {
 
 	NotAnEnv   string
 	unexported string `env:"FOO"`
+}
+
+type ParentStruct struct {
+	InnerStruct    *InnerStruct `env:",init"`
+	NilInnerStruct *InnerStruct
+	unexported     *InnerStruct
+	Ignored        *http.Client
+}
+
+type InnerStruct struct {
+	Inner  string `env:"innervar"`
+	Number uint   `env:"innernum"`
 }
 
 func TestParsesEnv(t *testing.T) {
@@ -357,6 +370,149 @@ func TestParsesEnv(t *testing.T) {
 	isEqual(t, cfg.unexported, "")
 }
 
+func TestInvalidBool(t *testing.T) {
+	t.Setenv("BOOL", "should-be-a-bool")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Bool" of type "bool": strconv.ParseBool: parsing "should-be-a-bool": invalid syntax; parse error on field "BoolPtr" of type "*bool": strconv.ParseBool: parsing "should-be-a-bool": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidInt(t *testing.T) {
+	t.Setenv("INT", "should-be-an-int")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Int" of type "int": strconv.ParseInt: parsing "should-be-an-int": invalid syntax; parse error on field "IntPtr" of type "*int": strconv.ParseInt: parsing "should-be-an-int": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidUint(t *testing.T) {
+	t.Setenv("UINT", "-44")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Uint" of type "uint": strconv.ParseUint: parsing "-44": invalid syntax; parse error on field "UintPtr" of type "*uint": strconv.ParseUint: parsing "-44": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidFloat32(t *testing.T) {
+	t.Setenv("FLOAT32", "AAA")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Float32" of type "float32": strconv.ParseFloat: parsing "AAA": invalid syntax; parse error on field "Float32Ptr" of type "*float32": strconv.ParseFloat: parsing "AAA": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidFloat64(t *testing.T) {
+	t.Setenv("FLOAT64", "AAA")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Float64" of type "float64": strconv.ParseFloat: parsing "AAA": invalid syntax; parse error on field "Float64Ptr" of type "*float64": strconv.ParseFloat: parsing "AAA": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidUint64(t *testing.T) {
+	t.Setenv("UINT64", "AAA")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Uint64" of type "uint64": strconv.ParseUint: parsing "AAA": invalid syntax; parse error on field "Uint64Ptr" of type "*uint64": strconv.ParseUint: parsing "AAA": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidInt64(t *testing.T) {
+	t.Setenv("INT64", "AAA")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Int64" of type "int64": strconv.ParseInt: parsing "AAA": invalid syntax; parse error on field "Int64Ptr" of type "*int64": strconv.ParseInt: parsing "AAA": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidInt64Slice(t *testing.T) {
+	t.Setenv("BADINTS", "A,2,3")
+	type config struct {
+		BadFloats []int64 `env:"BADINTS"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "BadFloats" of type "[]int64": strconv.ParseInt: parsing "A": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidUInt64Slice(t *testing.T) {
+	t.Setenv("BADINTS", "A,2,3")
+	type config struct {
+		BadFloats []uint64 `env:"BADINTS"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "BadFloats" of type "[]uint64": strconv.ParseUint: parsing "A": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidFloat32Slice(t *testing.T) {
+	t.Setenv("BADFLOATS", "A,2.0,3.0")
+	type config struct {
+		BadFloats []float32 `env:"BADFLOATS"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "BadFloats" of type "[]float32": strconv.ParseFloat: parsing "A": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidFloat64Slice(t *testing.T) {
+	t.Setenv("BADFLOATS", "A,2.0,3.0")
+	type config struct {
+		BadFloats []float64 `env:"BADFLOATS"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "BadFloats" of type "[]float64": strconv.ParseFloat: parsing "A": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidBoolsSlice(t *testing.T) {
+	t.Setenv("BADBOOLS", "t,f,TRUE,faaaalse")
+	type config struct {
+		BadBools []bool `env:"BADBOOLS"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "BadBools" of type "[]bool": strconv.ParseBool: parsing "faaaalse": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidDuration(t *testing.T) {
+	t.Setenv("DURATION", "should-be-a-valid-duration")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Duration" of type "time.Duration": unable to parse duration: time: invalid duration "should-be-a-valid-duration"; parse error on field "DurationPtr" of type "*time.Duration": unable to parse duration: time: invalid duration "should-be-a-valid-duration"`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidDurations(t *testing.T) {
+	t.Setenv("DURATIONS", "1s,contains-an-invalid-duration,3s")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Durations" of type "[]time.Duration": unable to parse duration: time: invalid duration "contains-an-invalid-duration"; parse error on field "DurationPtrs" of type "[]*time.Duration": unable to parse duration: time: invalid duration "contains-an-invalid-duration"`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidLocation(t *testing.T) {
+	t.Setenv("LOCATION", "should-be-a-valid-location")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Location" of type "time.Location": unable to parse location: unknown time zone should-be-a-valid-location; parse error on field "LocationPtr" of type "*time.Location": unable to parse location: unknown time zone should-be-a-valid-location`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestInvalidLocations(t *testing.T) {
+	t.Setenv("LOCATIONS", "should-be-a-valid-location,UTC,Europe/Berlin")
+	err := Parse(&Config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Locations" of type "[]time.Location": unable to parse location: unknown time zone should-be-a-valid-location; parse error on field "LocationPtrs" of type "[]*time.Location": unable to parse location: unknown time zone should-be-a-valid-location`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestParseStructWithoutEnvTag(t *testing.T) {
+	cfg := Config{}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, cfg.NotAnEnv, "")
+}
+
+func TestParseStructWithInvalidFieldKind(t *testing.T) {
+	type config struct {
+		WontWorkByte byte `env:"BLAH"`
+	}
+	t.Setenv("BLAH", "a")
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "WontWorkByte" of type "uint8": strconv.ParseUint: parsing "a": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
 func TestParsesEnv_Map(t *testing.T) {
 	type config struct {
 		MapStringString                map[string]string `env:"MAP_STRING_STRING" envSeparator:","`
@@ -486,14 +642,6 @@ func TestParsesEnvInnerFailsMultipleErrors(t *testing.T) {
 }
 
 func TestParsesEnvInner_WhenInnerStructPointerIsNil(t *testing.T) {
-	type InnerStruct struct {
-		Inner  string `env:"innervar"`
-		Number uint   `env:"innernum"`
-	}
-	type ParentStruct struct {
-		InnerStruct *InnerStruct `env:",init"`
-	}
-
 	t.Setenv("innervar", "someinnervalue")
 	t.Setenv("innernum", "8")
 	cfg := ParentStruct{}
@@ -668,6 +816,65 @@ func TestFileWithDefault(t *testing.T) {
 	cfg := config{}
 	isNoErr(t, Parse(&cfg))
 	isEqual(t, "secret", cfg.SecretKey)
+}
+
+func TestParsesEnvInnerNil(t *testing.T) {
+	t.Setenv("innervar", "someinnervalue")
+	cfg := ParentStruct{}
+	isNoErr(t, Parse(&cfg))
+}
+
+func TestParsesEnvInnerInvalid(t *testing.T) {
+	t.Setenv("innernum", "-547")
+	cfg := ParentStruct{
+		InnerStruct: &InnerStruct{},
+	}
+	err := Parse(&cfg)
+	isErrorWithMessage(t, err, `env: parse error on field "Number" of type "uint": strconv.ParseUint: parsing "-547": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestParsesEnvNested(t *testing.T) {
+	type NestedStruct struct {
+		NestedVar string `env:"nestedvar"`
+	}
+	type ForNestedStruct struct {
+		NestedStruct
+	}
+
+	t.Setenv("nestedvar", "somenestedvalue")
+	var cfg ForNestedStruct
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, "somenestedvalue", cfg.NestedVar)
+}
+
+func TestEmptyVars(t *testing.T) {
+	cfg := Config{}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, "", cfg.String)
+	isEqual(t, false, cfg.Bool)
+	isEqual(t, 0, cfg.Int)
+	isEqual(t, uint(0), cfg.Uint)
+	isEqual(t, uint64(0), cfg.Uint64)
+	isEqual(t, int64(0), cfg.Int64)
+	isEqual(t, 0, len(cfg.Strings))
+	isEqual(t, 0, len(cfg.CustomSeparator))
+	isEqual(t, 0, len(cfg.Ints))
+	isEqual(t, 0, len(cfg.Bools))
+}
+
+func TestPassAnInvalidPtr(t *testing.T) {
+	var thisShouldBreak int
+	err := Parse(&thisShouldBreak)
+	isErrorWithMessage(t, err, "env: expected a pointer to a Struct")
+	isTrue(t, errors.Is(err, NotStructPtrError{}))
+}
+
+func TestPassReference(t *testing.T) {
+	cfg := Config{}
+	err := Parse(cfg)
+	isErrorWithMessage(t, err, "env: expected a pointer to a Struct")
+	isTrue(t, errors.Is(err, NotStructPtrError{}))
 }
 
 func isEqual(tb testing.TB, a, b interface{}) {
