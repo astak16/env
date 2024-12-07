@@ -99,3 +99,28 @@ type NotStructPtrError struct{}
 func (e NotStructPtrError) Error() string {
 	return "expected a pointer to a Struct"
 }
+
+type NoSupportedTagOptionError struct {
+	Tag string
+}
+
+func newNoSupportedTagOptionError(tag string) error {
+	return NoSupportedTagOptionError{tag}
+}
+
+func (e NoSupportedTagOptionError) Error() string {
+	return fmt.Sprintf("tag option %q not supported", e.Tag)
+}
+
+type NoParserError struct {
+	Name string
+	Type reflect.Type
+}
+
+func newNoParserError(sf reflect.StructField) error {
+	return NoParserError{sf.Name, sf.Type}
+}
+
+func (e NoParserError) Error() string {
+	return fmt.Sprintf("no parser found for field %q of type %q", e.Name, e.Type)
+}

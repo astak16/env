@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -877,6 +878,132 @@ func TestPassReference(t *testing.T) {
 	isTrue(t, errors.Is(err, NotStructPtrError{}))
 }
 
+func TestEmptyOption(t *testing.T) {
+	type config struct {
+		Var string `env:"VAR,"`
+	}
+
+	cfg := &config{}
+
+	t.Setenv("VAR", "")
+	isNoErr(t, Parse(cfg))
+	isEqual(t, "", cfg.Var)
+}
+
+func TestErrorOptionNotRecognized(t *testing.T) {
+	type config struct {
+		Var string `env:"VAR,not_supported!"`
+	}
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: tag option "not_supported!" not supported`)
+	isTrue(t, errors.Is(err, NoSupportedTagOptionError{}))
+}
+
+func TestParseURL(t *testing.T) {
+	type config struct {
+		ExampleURL url.URL `env:"EXAMPLE_URL" envDefault:"https://google.com"`
+	}
+	var cfg config
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, "https://google.com", cfg.ExampleURL.String())
+}
+
+func TestParseInvalidURL(t *testing.T) {
+	type config struct {
+		ExampleURL url.URL `env:"EXAMPLE_URL_2"`
+	}
+	t.Setenv("EXAMPLE_URL_2", "nope://s s/")
+
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "ExampleURL" of type "url.URL": unable to parse URL: parse "nope://s s/": invalid character " " in host name`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestIgnoresUnexported(t *testing.T) {
+	type unexportedConfig struct {
+		home  string `env:"HOME"`
+		Home2 string `env:"HOME"`
+	}
+	cfg := unexportedConfig{}
+
+	t.Setenv("HOME", "/tmp/fakehome")
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, cfg.home, "")
+	isEqual(t, "/tmp/fakehome", cfg.Home2)
+}
+
+func TestErrorIs(t *testing.T) {
+	err := newAggregateError(newParseError(reflect.StructField{}, nil))
+	t.Run("is", func(t *testing.T) {
+		isTrue(t, errors.Is(err, ParseError{}))
+	})
+	t.Run("is not", func(t *testing.T) {
+		isFalse(t, errors.Is(err, NoParserError{}))
+	})
+}
+
+func TestIssue245(t *testing.T) {
+	t.Setenv("NAME_NOT_SET", "")
+	type user struct {
+		Name string `env:"NAME_NOT_SET" envDefault:"abcd"`
+	}
+	cfg := user{}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, cfg.Name, "abcd")
+}
+
+func TestIssue339(t *testing.T) {
+	t.Run("Should parse with bool ptr set and env undefined", func(t *testing.T) {
+		existingValue := true
+		cfg := Config{
+			BoolPtr: &existingValue,
+		}
+
+		isNoErr(t, Parse(&cfg))
+
+		isEqual(t, &existingValue, cfg.BoolPtr)
+	})
+
+	t.Run("Should parse with bool ptr set and env defined", func(t *testing.T) {
+		existingValue := true
+		cfg := Config{
+			BoolPtr: &existingValue,
+		}
+
+		newValue := false
+		t.Setenv("BOOL", strconv.FormatBool(newValue))
+
+		isNoErr(t, Parse(&cfg))
+
+		isEqual(t, &newValue, cfg.BoolPtr)
+	})
+
+	t.Run("Should parse with string ptr set and env undefined", func(t *testing.T) {
+		existingValue := "one"
+		cfg := Config{
+			StringPtr: &existingValue,
+		}
+
+		isNoErr(t, Parse(&cfg))
+
+		isEqual(t, &existingValue, cfg.StringPtr)
+	})
+
+	t.Run("Should parse with string ptr set and env defined", func(t *testing.T) {
+		existingValue := "one"
+		cfg := Config{
+			StringPtr: &existingValue,
+		}
+
+		newValue := "two"
+		t.Setenv("STRING", newValue)
+
+		isNoErr(t, Parse(&cfg))
+
+		isEqual(t, &newValue, cfg.StringPtr)
+	})
+}
+
 func isEqual(tb testing.TB, a, b interface{}) {
 	tb.Helper()
 
@@ -928,6 +1055,14 @@ func isTrue(tb testing.TB, b bool) {
 
 	if !b {
 		tb.Fatalf("expected true, got false")
+	}
+}
+
+func isFalse(tb testing.TB, b bool) {
+	tb.Helper()
+
+	if b {
+		tb.Fatalf("expected false, got true")
 	}
 }
 

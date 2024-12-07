@@ -107,6 +107,8 @@ func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, err
 			result.Unset = true
 		case "file":
 			result.LoadFile = true
+		default:
+			return FieldParams{}, newNoSupportedTagOptionError(tag)
 		}
 	}
 	return result, nil
@@ -160,6 +162,8 @@ func get(fieldParams FieldParams, opts Options) (val string, err error) {
 func getOr(key, defaultValue string, defExists bool, env map[string]string) (val string, exists bool, isDefault bool) {
 	value, exists := env[key]
 	switch {
+	case exists && value == "" && defExists:
+		return defaultValue, true, true
 	case (!exists || key == "") && defExists:
 		return defaultValue, true, true
 	case !exists:
@@ -176,21 +180,24 @@ func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[
 		fieldee.Set(reflect.New(field.Type().Elem()))
 		fieldee = field.Elem()
 	}
-	parserFunc, ok := getParserFunc(funcMap, typee)
-	if ok {
-		val, err := parserFunc(value)
-		if err != nil {
-			return newParseError(sf, err)
-		}
-		fieldee.Set(reflect.ValueOf(val).Convert(typee))
-		return nil
-	}
+
 	switch field.Kind() {
 	case reflect.Slice:
 		return handleSlice(field, value, sf, funcMap)
 	case reflect.Map:
 		return handleMap(field, value, sf, funcMap)
 	}
+
+	parserFunc, err := getParserFunc(funcMap, typee, sf)
+	if err != nil {
+		return err
+	}
+
+	val, err := parserFunc(value)
+	if err != nil {
+		return newParseError(sf, err)
+	}
+	fieldee.Set(reflect.ValueOf(val).Convert(typee))
 	return nil
 }
 
@@ -205,9 +212,13 @@ func handleSlice(field reflect.Value, value string, sf reflect.StructField, func
 		typee = typee.Elem()
 	}
 
-	parserFunc, ok := funcMap[typee]
-	if !ok {
-		parserFunc, ok = defaultBuiltInParsers[typee.Kind()]
+	//parserFunc, ok := funcMap[typee]
+	//if !ok {
+	//	parserFunc, ok = defaultBuiltInParsers[typee.Kind()]
+	//}
+	parserFunc, err := getParserFunc(funcMap, typee, sf)
+	if err != nil {
+		return err
 	}
 
 	result := reflect.MakeSlice(sf.Type, 0, len(parts))
@@ -230,16 +241,16 @@ func handleSlice(field reflect.Value, value string, sf reflect.StructField, func
 func handleMap(field reflect.Value, value string, sf reflect.StructField, funcMap map[reflect.Type]ParserFunc) error {
 	// 获取 key 的解析函数
 	keyType := sf.Type.Key()
-	keyParserFunc, ok := getParserFunc(funcMap, keyType)
-	if !ok {
-		return nil
+	keyParserFunc, err := getParserFunc(funcMap, keyType, sf)
+	if err != nil {
+		return err
 	}
 
 	// 获取 value 的解析函数
 	elemType := sf.Type.Elem()
-	elemParserFunc, ok := getParserFunc(funcMap, elemType)
-	if !ok {
-		return nil
+	elemParserFunc, err := getParserFunc(funcMap, elemType, sf)
+	if err != nil {
+		return err
 	}
 
 	separator := sf.Tag.Get("envSeparator")
@@ -283,13 +294,13 @@ func handleMap(field reflect.Value, value string, sf reflect.StructField, funcMa
 	return nil
 }
 
-func getParserFunc(funcMap map[reflect.Type]ParserFunc, typee reflect.Type) (ParserFunc, bool) {
+func getParserFunc(funcMap map[reflect.Type]ParserFunc, typee reflect.Type, sf reflect.StructField) (ParserFunc, error) {
 	parserFunc, ok := funcMap[typee]
 	if !ok {
 		parserFunc, ok = defaultBuiltInParsers[typee.Kind()]
 		if !ok {
-			return nil, false
+			return nil, newNoParserError(sf)
 		}
 	}
-	return parserFunc, true
+	return parserFunc, nil
 }
