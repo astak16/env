@@ -22,6 +22,12 @@ func ParseAs[T any]() (T, error) {
 	return t, err
 }
 
+func ParseAsWithOptions[T any](opts Options) (T, error) {
+	var t T
+	err := ParseWithOptions(&t, opts)
+	return t, err
+}
+
 func parseInternal(v interface{}, processField processFieldFn, opts Options) error {
 	ptrRef := reflect.ValueOf(v)
 	if ptrRef.Kind() != reflect.Ptr {

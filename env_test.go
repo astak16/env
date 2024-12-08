@@ -1585,6 +1585,16 @@ func TestMultipleTagOptions(t *testing.T) {
 	})
 }
 
+func TestParseAsWithOptions(t *testing.T) {
+	config, err := ParseAsWithOptions[Conf](Options{
+		Environment: map[string]string{
+			"FOO": "not bar",
+		},
+	})
+	isNoErr(t, err)
+	isEqual(t, "not bar", config.Foo)
+}
+
 func TestIssue226(t *testing.T) {
 	type config struct {
 		Inner struct {
@@ -1640,6 +1650,18 @@ func TestIssue245(t *testing.T) {
 	cfg := user{}
 	isNoErr(t, Parse(&cfg))
 	isEqual(t, cfg.Name, "abcd")
+}
+
+func TestIssue304(t *testing.T) {
+	t.Setenv("BACKEND_URL", "https://google.com")
+	type Config struct {
+		BackendURL string `envDefault:"localhost:8000"`
+	}
+	cfg, err := ParseAsWithOptions[Config](Options{
+		UseFieldNameByDefault: true,
+	})
+	isNoErr(t, err)
+	isEqual(t, "https://google.com", cfg.BackendURL)
 }
 
 func TestIssue310(t *testing.T) {
