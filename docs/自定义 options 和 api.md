@@ -366,6 +366,190 @@ func TestHook(t *testing.T) {
 }
 ```
 
-## 源码：
+## 导出 API
 
-[options](https://github.com/astak16/env/blob/2f04b5a5f127cabbc2d92594fe7e7caab5cc5919/env_type.go#L11)
+在我们之前学习的时候，我们已经知道了 `Parse` 和 `ParseWithOptions` 这两个函数，那么它还有其他什么函数吗
+
+- `Parse`：将 `os.Environment()` 中的环境变量解析成一个类型
+- `ParseWithOptions`：将当前的 `os.Environment()` 环境变量根据自定义 `options` 解析成一个类型
+- `ParseAs`：通过泛型，将 `os.Environment()` 中的环境变量解析成一个类型
+- `ParseAsWithOptions`：通过泛型，将当前的 `os.Environment()` 环境变量根据自定义 `options` 解析成一个类型
+- `Must`：如果解析出错，会 `panic`
+- `GetFieldParams`：获取 `env` 的解析项
+- `GetFieldParamsWithOptions`：通过自定义 `options`，获取 `env` 的解析项
+
+## ParseAs
+
+`ParseAs` 函数的作用和 `Prase` 函数差不多
+
+区别是 `ParseAs` 返回两个参数，一个是解析后的结构体，一个是 `error`，而 `Parse` 是通过指针的形式解析
+
+```go
+func ParseAs[T any]() (T, error) {
+    var t T
+    err := Parse(&t)
+    return t, err
+}
+```
+
+测试用例
+
+```go
+type Conf struct {
+    Foo string `env:"FOO" envDefault:"bar"`
+}
+
+func TestParseAs(t *testing.T) {
+    config, err := ParseAs[Conf]()
+    isNoErr(t, err)
+    isEqual(t, "bar", config.Foo)
+}
+
+func TestMultipleTagOptions(t *testing.T) {
+    type TestConfig struct {
+       URL *url.URL `env:"URL,init,unset"`
+    }
+    t.Run("unset", func(t *testing.T) {
+       cfg, err := ParseAs[TestConfig]()
+       isNoErr(t, err)
+       isEqual(t, &url.URL{}, cfg.URL)
+    })
+    t.Run("empty", func(t *testing.T) {
+       t.Setenv("URL", "")
+       cfg, err := ParseAs[TestConfig]()
+       isNoErr(t, err)
+       isEqual(t, &url.URL{}, cfg.URL)
+    })
+    t.Run("set", func(t *testing.T) {
+       t.Setenv("URL", "https://github.com/caarlos0")
+       cfg, err := ParseAs[TestConfig]()
+       isNoErr(t, err)
+       isEqual(t, &url.URL{Scheme: "https", Host: "github.com", Path: "/caarlos0"}, cfg.URL)
+       isEqual(t, "", os.Getenv("URL"))
+    })
+}
+```
+
+## ParseAsWithOptions
+
+`ParseAsWithOptions` 函数和 `ParseWithOptions` 类似，区别是 `ParseAsWithOptions` 是将解析后的值通过返回值返回出来
+
+```go
+func ParseAsWithOptions[T any](opts Options) (T, error) {
+    var t T
+    err := ParseWithOptions(&t, opts)
+    return t, err
+}
+```
+
+测试用例
+
+```go
+func TestParseAsWithOptions(t *testing.T) {
+    config, err := ParseAsWithOptions[Conf](Options{
+       Environment: map[string]string{
+          "FOO": "not bar",
+       },
+    })
+    isNoErr(t, err)
+    isEqual(t, "not bar", config.Foo)
+}
+```
+
+## Must
+
+如果 `err` 不为 `nil`，则会触发 `panic`；否则返回 `t`
+
+```go
+func Must[T any](t T, err error) T {
+    if err != nil {
+       panic(err)
+    }
+    return t
+}
+```
+
+测试用例
+
+```go
+func TestMust(t *testing.T) {
+    t.Run("error", func(t *testing.T) {
+       defer func() {
+          err := recover()
+          isErrorWithMessage(t, err.(error), `env: required environment variable "FOO" is not set`)
+       }()
+       conf := Must(ParseAs[ConfRequired]())
+       isEqual(t, "", conf.Foo)
+    })
+    t.Run("success", func(t *testing.T) {
+       t.Setenv("FOO", "bar")
+       conf := Must(ParseAs[ConfRequired]())
+       isEqual(t, "bar", conf.Foo)
+    })
+}
+```
+
+## GetFieldParamsWithOptions 和 GetFieldParams
+
+```go
+func GetFieldParams(v interface{}) ([]FieldParams, error) {
+    return GetFieldParamsWithOptions(v, defaultOptions())
+}
+
+func GetFieldParamsWithOptions(v interface{}, opts Options) ([]FieldParams, error) {
+    var result []FieldParams
+    err := parseInternal(
+       v,
+       func(_ reflect.Value, _ reflect.StructField, _ Options, fieldParams FieldParams) error {
+          if fieldParams.OwnKey != "" {
+             result = append(result, fieldParams)
+          }
+          return nil
+       },
+       customOptions(opts),
+    )
+    if err != nil {
+       return nil, err
+    }
+
+    return result, nil
+}
+```
+
+测试用例
+
+```go
+type FieldParamsConfig struct {
+    Simple         []string `env:"SIMPLE"`
+    WithoutEnv     string
+    privateWithEnv string `env:"PRIVATE_WITH_ENV"` //nolint:unused
+    WithDefault    string `env:"WITH_DEFAULT" envDefault:"default"`
+    Required       string `env:"REQUIRED,required"`
+    File           string `env:"FILE,file"`
+    Unset          string `env:"UNSET,unset"`
+    NotEmpty       string `env:"NOT_EMPTY,notEmpty"`
+    Expand         string `env:"EXPAND,expand"`
+    NestedConfig   struct {
+       Simple []string `env:"SIMPLE"`
+    } `envPrefix:"NESTED_"`
+}
+
+func TestGetFieldParams(t *testing.T) {
+    var config FieldParamsConfig
+    params, err := GetFieldParams(&config)
+    isNoErr(t, err)
+
+    expectedParams := []FieldParams{
+       {OwnKey: "SIMPLE", Key: "SIMPLE"},
+       {OwnKey: "WITH_DEFAULT", Key: "WITH_DEFAULT", DefaultValue: "default", HasDefaultValue: true},
+       {OwnKey: "REQUIRED", Key: "REQUIRED", Required: true},
+       {OwnKey: "FILE", Key: "FILE", LoadFile: true},
+       {OwnKey: "UNSET", Key: "UNSET", Unset: true},
+       {OwnKey: "NOT_EMPTY", Key: "NOT_EMPTY", NotEmpty: true},
+       {OwnKey: "EXPAND", Key: "EXPAND", Expand: true},
+       {OwnKey: "SIMPLE", Key: "NESTED_SIMPLE"},
+    }
+    isTrue(t, len(params) == len(expectedParams))
+    isTrue(t, areEqual(params, expectedParams))
+}
+```

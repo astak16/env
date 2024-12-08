@@ -35,6 +35,29 @@ func Must[T any](t T, err error) T {
 	return t
 }
 
+func GetFieldParams(v interface{}) ([]FieldParams, error) {
+	return GetFieldParamsWithOptions(v, defaultOptions())
+}
+
+func GetFieldParamsWithOptions(v interface{}, opts Options) ([]FieldParams, error) {
+	var result []FieldParams
+	err := parseInternal(
+		v,
+		func(_ reflect.Value, _ reflect.StructField, _ Options, fieldParams FieldParams) error {
+			if fieldParams.OwnKey != "" {
+				result = append(result, fieldParams)
+			}
+			return nil
+		},
+		customOptions(opts),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func parseInternal(v interface{}, processField processFieldFn, opts Options) error {
 	ptrRef := reflect.ValueOf(v)
 	if ptrRef.Kind() != reflect.Ptr {
