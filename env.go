@@ -12,6 +12,10 @@ func Parse(v interface{}) error {
 	return parseInternal(v, setField, defaultOptions())
 }
 
+func ParseWithOptions(v interface{}, opts Options) error {
+	return parseInternal(v, setField, customOptions(opts))
+}
+
 func parseInternal(v interface{}, processField processFieldFn, opts Options) error {
 	ptrRef := reflect.ValueOf(v)
 	if ptrRef.Kind() != reflect.Ptr {
@@ -83,11 +87,17 @@ func doParseField(refField reflect.Value, refTypeField reflect.StructField, proc
 
 func parseFieldParams(field reflect.StructField, opts Options) (FieldParams, error) {
 	ownKey, tags := parseKeyForOption(field.Tag.Get(opts.TagName))
+
+	if ownKey == "" && opts.UseFieldNameByDefault {
+		ownKey = toEnvName(field.Name)
+	}
+
 	defaultValue, hasDefaultValue := field.Tag.Lookup(opts.DefaultValueTagName)
 	result := FieldParams{
 		OwnKey:          ownKey,
 		Key:             opts.Prefix + ownKey,
 		DefaultValue:    defaultValue,
+		Required:        opts.RequiredIfNoDef,
 		HasDefaultValue: hasDefaultValue,
 	}
 
@@ -138,7 +148,7 @@ func get(fieldParams FieldParams, opts Options) (val string, err error) {
 		defer os.Unsetenv(fieldParams.Key)
 	}
 
-	if fieldParams.Required && !exists {
+	if fieldParams.Required && !exists && fieldParams.OwnKey != "" {
 		return "", newVarIsNotSetError(fieldParams.Key)
 	}
 	if fieldParams.NotEmpty && val == "" {
@@ -153,7 +163,10 @@ func get(fieldParams FieldParams, opts Options) (val string, err error) {
 		}
 	}
 
-	if isDefault {
+	if opts.OnSet != nil {
+		if fieldParams.OwnKey != "" {
+			opts.OnSet(fieldParams.Key, val, isDefault)
+		}
 	}
 
 	return val, nil
@@ -181,6 +194,16 @@ func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[
 		fieldee = field.Elem()
 	}
 
+	parserFunc, ok := getParserFunc(funcMap, typee)
+	if ok {
+		val, err := parserFunc(value)
+		if err != nil {
+			return newParseError(sf, err)
+		}
+		fieldee.Set(reflect.ValueOf(val).Convert(typee))
+		return nil
+	}
+
 	switch field.Kind() {
 	case reflect.Slice:
 		return handleSlice(field, value, sf, funcMap)
@@ -188,17 +211,7 @@ func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[
 		return handleMap(field, value, sf, funcMap)
 	}
 
-	parserFunc, err := getParserFunc(funcMap, typee, sf)
-	if err != nil {
-		return err
-	}
-
-	val, err := parserFunc(value)
-	if err != nil {
-		return newParseError(sf, err)
-	}
-	fieldee.Set(reflect.ValueOf(val).Convert(typee))
-	return nil
+	return newNoParserError(sf)
 }
 
 func handleSlice(field reflect.Value, value string, sf reflect.StructField, funcMap map[reflect.Type]ParserFunc) error {
@@ -212,13 +225,9 @@ func handleSlice(field reflect.Value, value string, sf reflect.StructField, func
 		typee = typee.Elem()
 	}
 
-	//parserFunc, ok := funcMap[typee]
-	//if !ok {
-	//	parserFunc, ok = defaultBuiltInParsers[typee.Kind()]
-	//}
-	parserFunc, err := getParserFunc(funcMap, typee, sf)
-	if err != nil {
-		return err
+	parserFunc, ok := getParserFunc(funcMap, typee)
+	if !ok {
+		return newNoParserError(sf)
 	}
 
 	result := reflect.MakeSlice(sf.Type, 0, len(parts))
@@ -241,16 +250,16 @@ func handleSlice(field reflect.Value, value string, sf reflect.StructField, func
 func handleMap(field reflect.Value, value string, sf reflect.StructField, funcMap map[reflect.Type]ParserFunc) error {
 	// 获取 key 的解析函数
 	keyType := sf.Type.Key()
-	keyParserFunc, err := getParserFunc(funcMap, keyType, sf)
-	if err != nil {
-		return err
+	keyParserFunc, ok := getParserFunc(funcMap, keyType)
+	if !ok {
+		return newNoParserError(sf)
 	}
 
 	// 获取 value 的解析函数
 	elemType := sf.Type.Elem()
-	elemParserFunc, err := getParserFunc(funcMap, elemType, sf)
-	if err != nil {
-		return err
+	elemParserFunc, ok := getParserFunc(funcMap, elemType)
+	if !ok {
+		return newNoParserError(sf)
 	}
 
 	separator := sf.Tag.Get("envSeparator")
@@ -294,13 +303,13 @@ func handleMap(field reflect.Value, value string, sf reflect.StructField, funcMa
 	return nil
 }
 
-func getParserFunc(funcMap map[reflect.Type]ParserFunc, typee reflect.Type, sf reflect.StructField) (ParserFunc, error) {
+func getParserFunc(funcMap map[reflect.Type]ParserFunc, typee reflect.Type) (ParserFunc, bool) {
 	parserFunc, ok := funcMap[typee]
 	if !ok {
 		parserFunc, ok = defaultBuiltInParsers[typee.Kind()]
 		if !ok {
-			return nil, newNoParserError(sf)
+			return nil, false
 		}
 	}
-	return parserFunc, nil
+	return parserFunc, ok
 }

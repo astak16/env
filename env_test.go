@@ -131,6 +131,230 @@ type InnerStruct struct {
 	Number uint   `env:"innernum"`
 }
 
+func TestSetenvAndTagOptsChain(t *testing.T) {
+	type config struct {
+		Key1 string `mytag:"KEY1,required"`
+		Key2 int    `mytag:"KEY2,required"`
+	}
+	envs := map[string]string{
+		"KEY1": "VALUE1",
+		"KEY2": "3",
+	}
+
+	cfg := config{}
+	isNoErr(t, ParseWithOptions(&cfg, Options{TagName: "mytag", Environment: envs}))
+	isEqual(t, "VALUE1", cfg.Key1)
+	isEqual(t, 3, cfg.Key2)
+}
+
+func TestJSONTag(t *testing.T) {
+	type config struct {
+		Key1 string `json:"KEY1"`
+		Key2 int    `json:"KEY2"`
+	}
+
+	t.Setenv("KEY1", "VALUE7")
+	t.Setenv("KEY2", "5")
+
+	cfg := config{}
+	isNoErr(t, ParseWithOptions(&cfg, Options{TagName: "json"}))
+	isEqual(t, "VALUE7", cfg.Key1)
+	isEqual(t, 5, cfg.Key2)
+}
+
+func TestParseWithOptionsNoPtr(t *testing.T) {
+	type foo struct{}
+	err := ParseWithOptions(foo{}, Options{})
+	isErrorWithMessage(t, err, "env: expected a pointer to a Struct")
+	isTrue(t, errors.Is(err, NotStructPtrError{}))
+}
+
+func TestParseWithOptionsInvalidType(t *testing.T) {
+	var c int
+	err := ParseWithOptions(&c, Options{})
+	isErrorWithMessage(t, err, "env: expected a pointer to a Struct")
+	isTrue(t, errors.Is(err, NotStructPtrError{}))
+}
+
+func TestRequiredIfNoDefOption(t *testing.T) {
+	type Tree struct {
+		Fruit string `env:"FRUIT"`
+	}
+	type config struct {
+		Name  string `env:"NAME"`
+		Genre string `env:"GENRE" envDefault:"Unknown"`
+		Tree
+	}
+	var cfg config
+
+	t.Run("missing", func(t *testing.T) {
+		err := ParseWithOptions(&cfg, Options{RequiredIfNoDef: true})
+		isErrorWithMessage(t, err, `env: required environment variable "NAME" is not set; required environment variable "FRUIT" is not set`)
+		isTrue(t, errors.Is(err, VarIsNotSetError{}))
+		t.Setenv("NAME", "John")
+		err = ParseWithOptions(&cfg, Options{RequiredIfNoDef: true})
+		isErrorWithMessage(t, err, `env: required environment variable "FRUIT" is not set`)
+		isTrue(t, errors.Is(err, VarIsNotSetError{}))
+	})
+
+	t.Run("all set", func(t *testing.T) {
+		t.Setenv("NAME", "John")
+		t.Setenv("FRUIT", "Apple")
+
+		// should not trigger an error for the missing 'GENRE' env because it has a default value.
+		isNoErr(t, ParseWithOptions(&cfg, Options{RequiredIfNoDef: true}))
+	})
+}
+
+func TestRequiredIfNoDefNested(t *testing.T) {
+	type Server struct {
+		Host string `env:"HOST"`
+		Port uint16 `env:"PORT"`
+	}
+	type API struct {
+		Server
+		Token string `env:"TOKEN"`
+	}
+	type config struct {
+		API API `envPrefix:"SERVER_"`
+	}
+
+	t.Run("missing", func(t *testing.T) {
+		var cfg config
+		t.Setenv("SERVER_HOST", "https://google.com")
+		t.Setenv("SERVER_TOKEN", "0xdeadfood")
+
+		err := ParseWithOptions(&cfg, Options{RequiredIfNoDef: true})
+		isErrorWithMessage(t, err, `env: required environment variable "SERVER_PORT" is not set`)
+		isTrue(t, errors.Is(err, VarIsNotSetError{}))
+	})
+
+	t.Run("all set", func(t *testing.T) {
+		var cfg config
+		t.Setenv("SERVER_HOST", "https://google.com")
+		t.Setenv("SERVER_PORT", "443")
+		t.Setenv("SERVER_TOKEN", "0xdeadfood")
+
+		isNoErr(t, ParseWithOptions(&cfg, Options{RequiredIfNoDef: true}))
+	})
+}
+
+func TestCustomParserBasicUnsupported(t *testing.T) {
+	type ConstT struct {
+		A int
+	}
+
+	type config struct {
+		Const ConstT `env:"CONST_"`
+	}
+
+	t.Setenv("CONST_", "42")
+
+	cfg := &config{}
+	err := Parse(cfg)
+
+	isEqual(t, cfg.Const, ConstT{0})
+	isErrorWithMessage(t, err, `env: no parser found for field "Const" of type "env.ConstT"`)
+	isTrue(t, errors.Is(err, NoParserError{}))
+}
+
+func TestPrefix(t *testing.T) {
+	type Config struct {
+		Home string `env:"HOME"`
+	}
+	type ComplexConfig struct {
+		Foo   Config `envPrefix:"FOO_"`
+		Bar   Config `envPrefix:"BAR_"`
+		Clean Config
+	}
+	cfg := ComplexConfig{}
+	isNoErr(t, ParseWithOptions(&cfg, Options{Environment: map[string]string{"FOO_HOME": "/foo", "BAR_HOME": "/bar", "HOME": "/clean"}}))
+	isEqual(t, "/foo", cfg.Foo.Home)
+	isEqual(t, "/bar", cfg.Bar.Home)
+	isEqual(t, "/clean", cfg.Clean.Home)
+}
+
+func TestPrefixPointers(t *testing.T) {
+	type Test struct {
+		Str string `env:"TEST"`
+	}
+	type ComplexConfig struct {
+		Foo   *Test `envPrefix:"FOO_"`
+		Bar   *Test `envPrefix:"BAR_"`
+		Clean *Test
+	}
+
+	cfg := ComplexConfig{
+		Foo:   &Test{},
+		Bar:   &Test{},
+		Clean: &Test{},
+	}
+	isNoErr(t, ParseWithOptions(&cfg, Options{Environment: map[string]string{"FOO_TEST": "kek", "BAR_TEST": "lel", "TEST": "clean"}}))
+	isEqual(t, "kek", cfg.Foo.Str)
+	isEqual(t, "lel", cfg.Bar.Str)
+	isEqual(t, "clean", cfg.Clean.Str)
+}
+
+func TestNestedPrefixPointer(t *testing.T) {
+	type ComplexConfig struct {
+		Foo struct {
+			Str string `env:"STR"`
+		} `envPrefix:"FOO_"`
+	}
+	cfg := ComplexConfig{}
+	isNoErr(t, ParseWithOptions(&cfg, Options{Environment: map[string]string{"FOO_STR": "foo_str"}}))
+	isEqual(t, "foo_str", cfg.Foo.Str)
+
+	type ComplexConfig2 struct {
+		Foo struct {
+			Bar struct {
+				Str string `env:"STR"`
+			} `envPrefix:"BAR_"`
+			Bar2 string `env:"BAR2"`
+		} `envPrefix:"FOO_"`
+	}
+	cfg2 := ComplexConfig2{}
+	isNoErr(t, ParseWithOptions(&cfg2, Options{Environment: map[string]string{"FOO_BAR_STR": "kek", "FOO_BAR2": "lel"}}))
+	isEqual(t, "lel", cfg2.Foo.Bar2)
+	isEqual(t, "kek", cfg2.Foo.Bar.Str)
+}
+
+func TestParseWithOptionsRenamedDefault(t *testing.T) {
+	type config struct {
+		Str string `env:"STR" envDefault:"foo" myDefault:"bar"`
+	}
+
+	cfg := &config{}
+	isNoErr(t, ParseWithOptions(cfg, Options{DefaultValueTagName: "myDefault"}))
+	isEqual(t, "bar", cfg.Str)
+
+	isNoErr(t, Parse(cfg))
+	isEqual(t, "foo", cfg.Str)
+}
+
+func TestParseWithOptionsRenamedPrefix(t *testing.T) {
+	type Config struct {
+		Str string `env:"STR"`
+	}
+	type ComplexConfig struct {
+		Foo Config `envPrefix:"FOO_" myPrefix:"BAR_"`
+	}
+
+	t.Setenv("FOO_STR", "101")
+	t.Setenv("BAR_STR", "202")
+	t.Setenv("APP_BAR_STR", "303")
+
+	cfg := &ComplexConfig{}
+	isNoErr(t, ParseWithOptions(cfg, Options{PrefixTagName: "myPrefix"}))
+	isEqual(t, "202", cfg.Foo.Str)
+
+	isNoErr(t, ParseWithOptions(cfg, Options{PrefixTagName: "myPrefix", Prefix: "APP_"}))
+	isEqual(t, "303", cfg.Foo.Str)
+
+	isNoErr(t, Parse(cfg))
+	isEqual(t, "101", cfg.Foo.Str)
+}
+
 func TestParsesEnv(t *testing.T) {
 	tos := func(v interface{}) string {
 		return fmt.Sprintf("%v", v)
@@ -567,6 +791,17 @@ func TestParsesEnvInvalidMap(t *testing.T) {
 	isTrue(t, errors.Is(err, ParseError{}))
 }
 
+func TestBadSeparator(t *testing.T) {
+	type config struct {
+		WontWork []int `env:"WONTWORK" envSeparator:":"`
+	}
+
+	t.Setenv("WONTWORK", "1,2,3,4")
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "WontWork" of type "[]int": strconv.ParseInt: parsing "1,2,3,4": invalid syntax`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
 func TestErrorRequiredNotSet(t *testing.T) {
 	type config struct {
 		IsRequired string `env:"IS_REQUIRED,required"`
@@ -652,14 +887,6 @@ func TestParsesEnvInner_WhenInnerStructPointerIsNil(t *testing.T) {
 }
 
 func TestParsesEnvInner(t *testing.T) {
-	type InnerStruct struct {
-		Inner  string `env:"innervar"`
-		Number uint   `env:"innernum"`
-	}
-	type ParentStruct struct {
-		InnerStruct *InnerStruct `env:",init"`
-	}
-
 	t.Setenv("innervar", "someinnervalue")
 	t.Setenv("innernum", "8")
 	cfg := ParentStruct{
@@ -932,6 +1159,388 @@ func TestIgnoresUnexported(t *testing.T) {
 	isEqual(t, "/tmp/fakehome", cfg.Home2)
 }
 
+func TestComplePrefix(t *testing.T) {
+	type Config struct {
+		Home string `env:"HOME"`
+	}
+	type ComplexConfig struct {
+		Foo   Config `envPrefix:"FOO_"`
+		Clean Config
+		Bar   Config `envPrefix:"BAR_"`
+		Blah  string `env:"BLAH"`
+	}
+	cfg := ComplexConfig{}
+	isNoErr(t, ParseWithOptions(&cfg, Options{
+		Prefix: "T_",
+		Environment: map[string]string{
+			"T_FOO_HOME": "/foo",
+			"T_BAR_HOME": "/bar",
+			"T_BLAH":     "blahhh",
+			"T_HOME":     "/clean",
+		},
+	}))
+	isEqual(t, "/foo", cfg.Foo.Home)
+	isEqual(t, "/bar", cfg.Bar.Home)
+	isEqual(t, "/clean", cfg.Clean.Home)
+	isEqual(t, "blahhh", cfg.Blah)
+}
+
+func TestParseCustomMapType(t *testing.T) {
+	type custommap map[string]bool
+
+	type config struct {
+		SecretKey custommap `env:"SECRET_KEY"`
+	}
+
+	t.Setenv("SECRET_KEY", "somesecretkey:1")
+
+	var cfg config
+	isNoErr(t, ParseWithOptions(&cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(custommap{}): func(_ string) (interface{}, error) {
+			return custommap(map[string]bool{}), nil
+		},
+	}}))
+}
+
+func TestParseMapCustomKeyType(t *testing.T) {
+	type CustomKey string
+
+	type config struct {
+		SecretKey map[CustomKey]bool `env:"SECRET"`
+	}
+
+	t.Setenv("SECRET", "somesecretkey:1")
+
+	var cfg config
+	isNoErr(t, ParseWithOptions(&cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(CustomKey("")): func(value string) (interface{}, error) {
+			return CustomKey(value), nil
+		},
+	}}))
+}
+
+func TestParseMapCustomKeyTypeError(t *testing.T) {
+	type CustomKey string
+
+	type config struct {
+		SecretKey map[CustomKey]bool `env:"SECRET"`
+	}
+
+	t.Setenv("SECRET", "somesecretkey:1")
+
+	var cfg config
+	err := ParseWithOptions(&cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(CustomKey("")): func(_ string) (interface{}, error) {
+			return nil, fmt.Errorf("custom error")
+		},
+	}})
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestParseMapCustomValueTypeError(t *testing.T) {
+	type Customval string
+
+	type config struct {
+		SecretKey map[string]Customval `env:"SECRET"`
+	}
+
+	t.Setenv("SECRET", "somesecretkey:1")
+
+	var cfg config
+	err := ParseWithOptions(&cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(Customval("")): func(_ string) (interface{}, error) {
+			return nil, fmt.Errorf("custom error")
+		},
+	}})
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestCustomParser(t *testing.T) {
+	type foo struct {
+		name string
+	}
+
+	type bar struct {
+		Name string `env:"OTHER_CUSTOM"`
+		Foo  *foo   `env:"BLAH_CUSTOM"`
+	}
+
+	type config struct {
+		Var   foo  `env:"VAR_CUSTOM"`
+		Foo   *foo `env:"BLAH_CUSTOM"`
+		Other *bar
+	}
+
+	t.Setenv("VAR_CUSTOM", "test")
+	t.Setenv("OTHER_CUSTOM", "test2")
+	t.Setenv("BLAH_CUSTOM", "test3")
+
+	runtest := func(t *testing.T) {
+		t.Helper()
+		cfg := &config{
+			Other: &bar{},
+		}
+		err := ParseWithOptions(cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+			reflect.TypeOf(foo{}): func(v string) (interface{}, error) {
+				return foo{name: v}, nil
+			},
+		}})
+
+		isNoErr(t, err)
+		isEqual(t, cfg.Var.name, "test")
+		isEqual(t, cfg.Foo.name, "test3")
+		isEqual(t, cfg.Other.Name, "test2")
+		isEqual(t, cfg.Other.Foo.name, "test3")
+	}
+
+	for i := 0; i < 10; i++ {
+		t.Run(fmt.Sprintf("%d", i), runtest)
+	}
+}
+
+func TestCustomParserError(t *testing.T) {
+	type foo struct {
+		name string
+	}
+
+	customParserFunc := func(_ string) (interface{}, error) {
+		return nil, errors.New("something broke")
+	}
+
+	t.Run("single", func(t *testing.T) {
+		type config struct {
+			Var foo `env:"VAR"`
+		}
+
+		t.Setenv("VAR", "single")
+		cfg := &config{}
+		err := ParseWithOptions(cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+			reflect.TypeOf(foo{}): customParserFunc,
+		}})
+
+		isEqual(t, cfg.Var.name, "")
+		isErrorWithMessage(t, err, `env: parse error on field "Var" of type "env.foo": something broke`)
+		isTrue(t, errors.Is(err, ParseError{}))
+	})
+
+	t.Run("slice", func(t *testing.T) {
+		type config struct {
+			Var []foo `env:"VAR2"`
+		}
+		t.Setenv("VAR2", "slice,slace")
+
+		cfg := &config{}
+		err := ParseWithOptions(cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+			reflect.TypeOf(foo{}): customParserFunc,
+		}})
+
+		isEqual(t, cfg.Var, nil)
+		isErrorWithMessage(t, err, `env: parse error on field "Var" of type "[]env.foo": something broke`)
+		isTrue(t, errors.Is(err, ParseError{}))
+	})
+}
+
+func TestCustomParserBasicType(t *testing.T) {
+	type ConstT int32
+
+	type config struct {
+		Const ConstT `env:"CONST_"`
+	}
+
+	exp := ConstT(123)
+	t.Setenv("CONST_", fmt.Sprintf("%d", exp))
+
+	customParserFunc := func(v string) (interface{}, error) {
+		i, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, err
+		}
+		r := ConstT(i)
+		return r, nil
+	}
+
+	cfg := &config{}
+	err := ParseWithOptions(cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(ConstT(0)): customParserFunc,
+	}})
+
+	isNoErr(t, err)
+	isEqual(t, exp, cfg.Const)
+}
+
+func TestCustomParserUint64Alias(t *testing.T) {
+	type T uint64
+
+	var one T = 1
+
+	type config struct {
+		Val T `env:"" envDefault:"1x"`
+	}
+
+	parserCalled := false
+
+	tParser := func(value string) (interface{}, error) {
+		parserCalled = true
+		trimmed := strings.TrimSuffix(value, "x")
+		i, err := strconv.Atoi(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		return T(i), nil
+	}
+
+	cfg := config{}
+
+	err := ParseWithOptions(&cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(one): tParser,
+	}})
+
+	isTrue(t, parserCalled)
+	isNoErr(t, err)
+	isEqual(t, T(1), cfg.Val)
+}
+
+func TestTypeCustomParserBasicInvalid(t *testing.T) {
+	type ConstT int32
+
+	type config struct {
+		Const ConstT `env:"CONST_"`
+	}
+
+	t.Setenv("CONST_", "foobar")
+
+	customParserFunc := func(_ string) (interface{}, error) {
+		return nil, errors.New("random error")
+	}
+
+	cfg := &config{}
+	err := ParseWithOptions(cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(ConstT(0)): customParserFunc,
+	}})
+
+	isEqual(t, cfg.Const, ConstT(0))
+	isErrorWithMessage(t, err, `env: parse error on field "Const" of type "env.ConstT": random error`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestCustomParserNotCalledForNonAlias(t *testing.T) {
+	type T uint64
+	type U uint64
+
+	type config struct {
+		Val   uint64 `env:"" envDefault:"33"`
+		Other U      `env:"OTHER_NAME" envDefault:"44"`
+	}
+
+	tParserCalled := false
+
+	tParser := func(_ string) (interface{}, error) {
+		tParserCalled = true
+		return T(99), nil
+	}
+
+	cfg := config{}
+
+	err := ParseWithOptions(&cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(T(0)): tParser,
+	}})
+
+	isFalse(t, tParserCalled)
+	isNoErr(t, err)
+	isEqual(t, uint64(33), cfg.Val)
+	isEqual(t, U(44), cfg.Other)
+}
+
+func TestCustomSliceType(t *testing.T) {
+	type customslice []byte
+
+	type config struct {
+		SecretKey customslice `env:"SECRET_KEY"`
+	}
+
+	t.Setenv("SECRET_KEY", "somesecretkey")
+
+	var cfg config
+	isNoErr(t, ParseWithOptions(&cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(customslice{}): func(value string) (interface{}, error) {
+			return customslice(value), nil
+		},
+	}}))
+}
+
+func TestParseWithOptionsOverride(t *testing.T) {
+	type config struct {
+		Interval time.Duration `env:"INTERVAL"`
+	}
+
+	t.Setenv("INTERVAL", "1")
+
+	var cfg config
+
+	isNoErr(t, ParseWithOptions(&cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf(time.Nanosecond): func(value string) (interface{}, error) {
+			intervalI, err := strconv.Atoi(value)
+			if err != nil {
+				return nil, err
+			}
+			return time.Duration(intervalI), nil
+		},
+	}}))
+}
+
+func TestNoEnvKey(t *testing.T) {
+	type Config struct {
+		Foo      string
+		FooBar   string
+		HTTPPort int
+		bar      string
+	}
+	var cfg Config
+	isNoErr(t, ParseWithOptions(&cfg, Options{
+		UseFieldNameByDefault: true,
+		Environment: map[string]string{
+			"FOO":       "fooval",
+			"FOO_BAR":   "foobarval",
+			"HTTP_PORT": "10",
+		},
+	}))
+	isEqual(t, "fooval", cfg.Foo)
+	isEqual(t, "foobarval", cfg.FooBar)
+	isEqual(t, 10, cfg.HTTPPort)
+	isEqual(t, "", cfg.bar)
+}
+
+func TestHook(t *testing.T) {
+	type config struct {
+		Something string `env:"SOMETHING" envDefault:"important"`
+		Another   string `env:"ANOTHER"`
+		Nope      string
+		Inner     struct{} `envPrefix:"FOO_"`
+	}
+
+	cfg := &config{}
+	t.Setenv("ANOTHER", "1")
+
+	type onSetArgs struct {
+		tag       string
+		key       interface{}
+		isDefault bool
+	}
+
+	var onSetCalled []onSetArgs
+
+	isNoErr(t, ParseWithOptions(cfg, Options{
+		OnSet: func(tag string, value interface{}, isDefault bool) {
+			onSetCalled = append(onSetCalled, onSetArgs{tag, value, isDefault})
+		},
+	}))
+	isEqual(t, "important", cfg.Something)
+	isEqual(t, "1", cfg.Another)
+	isEqual(t, 2, len(onSetCalled))
+	isEqual(t, onSetArgs{"SOMETHING", "important", true}, onSetCalled[0])
+	isEqual(t, onSetArgs{"ANOTHER", "1", false}, onSetCalled[1])
+}
+
 func TestErrorIs(t *testing.T) {
 	err := newAggregateError(newParseError(reflect.StructField{}, nil))
 	t.Run("is", func(t *testing.T) {
@@ -942,6 +1551,53 @@ func TestErrorIs(t *testing.T) {
 	})
 }
 
+func TestIssue226(t *testing.T) {
+	type config struct {
+		Inner struct {
+			Abc []byte `env:"ABC" envDefault:"asdasd"`
+			Def []byte `env:"DEF" envDefault:"a"`
+		}
+		Hij []byte `env:"HIJ"`
+		Lmn []byte `env:"LMN"`
+	}
+
+	t.Setenv("HIJ", "a")
+	t.Setenv("LMN", "b")
+
+	cfg := &config{}
+	isNoErr(t, ParseWithOptions(cfg, Options{FuncMap: map[reflect.Type]ParserFunc{
+		reflect.TypeOf([]byte{0}): func(v string) (interface{}, error) {
+			if v == "a" {
+				return []byte("nope"), nil
+			}
+			return []byte(v), nil
+		},
+	}}))
+	isEqual(t, cfg.Inner.Abc, []byte("asdasd"))
+	isEqual(t, cfg.Inner.Def, []byte("nope"))
+	isEqual(t, cfg.Hij, []byte("nope"))
+	isEqual(t, cfg.Lmn, []byte("b"))
+}
+
+func TestIssue234(t *testing.T) {
+	type Test struct {
+		Str string `env:"TEST"`
+	}
+	type ComplexConfig struct {
+		Foo   *Test `envPrefix:"FOO_" env:",init"`
+		Bar   Test  `envPrefix:"BAR_"`
+		Clean *Test
+	}
+
+	t.Setenv("FOO_TEST", "kek")
+	t.Setenv("BAR_TEST", "lel")
+
+	cfg := ComplexConfig{}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, "kek", cfg.Foo.Str)
+	isEqual(t, "lel", cfg.Bar.Str)
+}
+
 func TestIssue245(t *testing.T) {
 	t.Setenv("NAME_NOT_SET", "")
 	type user struct {
@@ -950,6 +1606,66 @@ func TestIssue245(t *testing.T) {
 	cfg := user{}
 	isNoErr(t, Parse(&cfg))
 	isEqual(t, cfg.Name, "abcd")
+}
+
+func TestIssue317(t *testing.T) {
+	type TestConfig struct {
+		U1 *url.URL `env:"U1"`
+		U2 *url.URL `env:"U2,init"`
+	}
+	cases := []struct {
+		desc                   string
+		environment            map[string]string
+		expectedU1, expectedU2 *url.URL
+	}{
+		{
+			desc:        "unset",
+			environment: map[string]string{},
+			expectedU1:  nil,
+			expectedU2:  &url.URL{},
+		},
+		{
+			desc:        "empty",
+			environment: map[string]string{"U1": "", "U2": ""},
+			expectedU1:  nil,
+			expectedU2:  &url.URL{},
+		},
+		{
+			desc:        "set",
+			environment: map[string]string{"U1": "https://example.com/"},
+			expectedU1:  &url.URL{Scheme: "https", Host: "example.com", Path: "/"},
+			expectedU2:  &url.URL{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			cfg := TestConfig{}
+			err := ParseWithOptions(&cfg, Options{Environment: tc.environment})
+			isNoErr(t, err)
+			isEqual(t, tc.expectedU1, cfg.U1)
+			isEqual(t, tc.expectedU2, cfg.U2)
+		})
+	}
+}
+
+func TestIssue320(t *testing.T) {
+	type Test struct {
+		Str string `env:"STR"`
+		Num int    `env:"NUM"`
+	}
+	type ComplexConfig struct {
+		Foo *[]Test `envPrefix:"FOO_"`
+		Bar []Test  `envPrefix:"BAR"`
+		Baz []Test  `env:",init"`
+	}
+
+	cfg := ComplexConfig{}
+
+	isNoErr(t, Parse(&cfg))
+
+	isEqual(t, cfg.Foo, nil)
+	isEqual(t, cfg.Bar, nil)
+	isEqual(t, cfg.Baz, nil)
 }
 
 func TestIssue339(t *testing.T) {
