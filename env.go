@@ -28,6 +28,13 @@ func ParseAsWithOptions[T any](opts Options) (T, error) {
 	return t, err
 }
 
+func Must[T any](t T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
 func parseInternal(v interface{}, processField processFieldFn, opts Options) error {
 	ptrRef := reflect.ValueOf(v)
 	if ptrRef.Kind() != reflect.Ptr {

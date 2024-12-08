@@ -1595,6 +1595,26 @@ func TestParseAsWithOptions(t *testing.T) {
 	isEqual(t, "not bar", config.Foo)
 }
 
+type ConfRequired struct {
+	Foo string `env:"FOO,required"`
+}
+
+func TestMust(t *testing.T) {
+	t.Run("error", func(t *testing.T) {
+		defer func() {
+			err := recover()
+			isErrorWithMessage(t, err.(error), `env: required environment variable "FOO" is not set`)
+		}()
+		conf := Must(ParseAs[ConfRequired]())
+		isEqual(t, "", conf.Foo)
+	})
+	t.Run("success", func(t *testing.T) {
+		t.Setenv("FOO", "bar")
+		conf := Must(ParseAs[ConfRequired]())
+		isEqual(t, "bar", conf.Foo)
+	})
+}
+
 func TestIssue226(t *testing.T) {
 	type config struct {
 		Inner struct {
