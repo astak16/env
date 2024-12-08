@@ -1551,6 +1551,40 @@ func TestErrorIs(t *testing.T) {
 	})
 }
 
+type Conf struct {
+	Foo string `env:"FOO" envDefault:"bar"`
+}
+
+func TestParseAs(t *testing.T) {
+	config, err := ParseAs[Conf]()
+	isNoErr(t, err)
+	isEqual(t, "bar", config.Foo)
+}
+
+func TestMultipleTagOptions(t *testing.T) {
+	type TestConfig struct {
+		URL *url.URL `env:"URL,init,unset"`
+	}
+	t.Run("unset", func(t *testing.T) {
+		cfg, err := ParseAs[TestConfig]()
+		isNoErr(t, err)
+		isEqual(t, &url.URL{}, cfg.URL)
+	})
+	t.Run("empty", func(t *testing.T) {
+		t.Setenv("URL", "")
+		cfg, err := ParseAs[TestConfig]()
+		isNoErr(t, err)
+		isEqual(t, &url.URL{}, cfg.URL)
+	})
+	t.Run("set", func(t *testing.T) {
+		t.Setenv("URL", "https://github.com/caarlos0")
+		cfg, err := ParseAs[TestConfig]()
+		isNoErr(t, err)
+		isEqual(t, &url.URL{Scheme: "https", Host: "github.com", Path: "/caarlos0"}, cfg.URL)
+		isEqual(t, "", os.Getenv("URL"))
+	})
+}
+
 func TestIssue226(t *testing.T) {
 	type config struct {
 		Inner struct {
@@ -1606,6 +1640,15 @@ func TestIssue245(t *testing.T) {
 	cfg := user{}
 	isNoErr(t, Parse(&cfg))
 	isEqual(t, cfg.Name, "abcd")
+}
+
+func TestIssue310(t *testing.T) {
+	type TestConfig struct {
+		URL *url.URL
+	}
+	cfg, err := ParseAs[TestConfig]()
+	isNoErr(t, err)
+	isEqual(t, nil, cfg.URL)
 }
 
 func TestIssue317(t *testing.T) {
