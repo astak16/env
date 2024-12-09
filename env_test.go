@@ -1,6 +1,8 @@
 package env
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -96,6 +98,11 @@ type Config struct {
 	LocationPtr  *time.Location   `env:"LOCATION"`
 	LocationPtrs []*time.Location `env:"LOCATIONS"`
 
+	Unmarshaler     unmarshaler    `env:"UNMARSHALER"`
+	UnmarshalerPtr  *unmarshaler   `env:"UNMARSHALER"`
+	Unmarshalers    []unmarshaler  `env:"UNMARSHALERS"`
+	UnmarshalerPtrs []*unmarshaler `env:"UNMARSHALERS"`
+
 	URL     url.URL    `env:"URL"`
 	URLPtr  *url.URL   `env:"URL"`
 	URLs    []url.URL  `env:"URLS"`
@@ -129,6 +136,292 @@ type ParentStruct struct {
 type InnerStruct struct {
 	Inner  string `env:"innervar"`
 	Number uint   `env:"innernum"`
+}
+
+type unmarshaler struct {
+	time.Duration
+}
+
+// TextUnmarshaler implements encoding.TextUnmarshaler.
+func (d *unmarshaler) UnmarshalText(data []byte) (err error) {
+	if len(data) != 0 {
+		d.Duration, err = time.ParseDuration(string(data))
+	} else {
+		d.Duration = 0
+	}
+	return err
+}
+
+func TestParsesEnv(t *testing.T) {
+	tos := func(v interface{}) string {
+		return fmt.Sprintf("%v", v)
+	}
+
+	toss := func(v ...interface{}) string {
+		ss := []string{}
+		for _, s := range v {
+			ss = append(ss, tos(s))
+		}
+		return strings.Join(ss, ",")
+	}
+
+	str1 := "str1"
+	str2 := "str2"
+	t.Setenv("STRING", str1)
+	t.Setenv("STRINGS", toss(str1, str2))
+
+	bool1 := true
+	bool2 := false
+	t.Setenv("BOOL", tos(bool1))
+	t.Setenv("BOOLS", toss(bool1, bool2))
+
+	int1 := -1
+	int2 := 2
+	t.Setenv("INT", tos(int1))
+	t.Setenv("INTS", toss(int1, int2))
+
+	var int81 int8 = -2
+	var int82 int8 = 5
+	t.Setenv("INT8", tos(int81))
+	t.Setenv("INT8S", toss(int81, int82))
+
+	var int161 int16 = -24
+	var int162 int16 = 15
+	t.Setenv("INT16", tos(int161))
+	t.Setenv("INT16S", toss(int161, int162))
+
+	var int321 int32 = -14
+	var int322 int32 = 154
+	t.Setenv("INT32", tos(int321))
+	t.Setenv("INT32S", toss(int321, int322))
+
+	var int641 int64 = -12
+	var int642 int64 = 150
+	t.Setenv("INT64", tos(int641))
+	t.Setenv("INT64S", toss(int641, int642))
+
+	var uint1 uint = 1
+	var uint2 uint = 2
+	t.Setenv("UINT", tos(uint1))
+	t.Setenv("UINTS", toss(uint1, uint2))
+
+	var uint81 uint8 = 15
+	var uint82 uint8 = 51
+	t.Setenv("UINT8", tos(uint81))
+	t.Setenv("UINT8S", toss(uint81, uint82))
+
+	var uint161 uint16 = 532
+	var uint162 uint16 = 123
+	t.Setenv("UINT16", tos(uint161))
+	t.Setenv("UINT16S", toss(uint161, uint162))
+
+	var uint321 uint32 = 93
+	var uint322 uint32 = 14
+	t.Setenv("UINT32", tos(uint321))
+	t.Setenv("UINT32S", toss(uint321, uint322))
+
+	var uint641 uint64 = 5
+	var uint642 uint64 = 43
+	t.Setenv("UINT64", tos(uint641))
+	t.Setenv("UINT64S", toss(uint641, uint642))
+
+	var float321 float32 = 9.3
+	var float322 float32 = 1.1
+	t.Setenv("FLOAT32", tos(float321))
+	t.Setenv("FLOAT32S", toss(float321, float322))
+
+	float641 := 1.53
+	float642 := 0.5
+	t.Setenv("FLOAT64", tos(float641))
+	t.Setenv("FLOAT64S", toss(float641, float642))
+
+	duration1 := time.Second
+	duration2 := time.Second * 4
+	t.Setenv("DURATION", tos(duration1))
+	t.Setenv("DURATIONS", toss(duration1, duration2))
+
+	location1 := time.UTC
+	location2, errLoadLocation := time.LoadLocation("Europe/Berlin")
+	isNoErr(t, errLoadLocation)
+	t.Setenv("LOCATION", tos(location1))
+	t.Setenv("LOCATIONS", toss(location1, location2))
+
+	unmarshaler1 := unmarshaler{time.Minute}
+	unmarshaler2 := unmarshaler{time.Millisecond * 1232}
+	t.Setenv("UNMARSHALER", tos(unmarshaler1.Duration))
+	t.Setenv("UNMARSHALERS", toss(unmarshaler1.Duration, unmarshaler2.Duration))
+
+	url1 := "https://goreleaser.com"
+	url2 := "https://caarlos0.dev"
+	t.Setenv("URL", tos(url1))
+	t.Setenv("URLS", toss(url1, url2))
+
+	t.Setenv("SEPSTRINGS", str1+":"+str2)
+
+	nonDefinedStr := "nonDefinedStr"
+	t.Setenv("NONDEFINED_STR", nonDefinedStr)
+	t.Setenv("PRF_NONDEFINED_STR", nonDefinedStr)
+
+	t.Setenv("FOO", str1)
+
+	cfg := Config{}
+	isNoErr(t, Parse(&cfg))
+
+	isEqual(t, str1, cfg.String)
+	isEqual(t, &str1, cfg.StringPtr)
+	isEqual(t, str1, cfg.Strings[0])
+	isEqual(t, str2, cfg.Strings[1])
+	isEqual(t, &str1, cfg.StringPtrs[0])
+	isEqual(t, &str2, cfg.StringPtrs[1])
+
+	isEqual(t, bool1, cfg.Bool)
+	isEqual(t, &bool1, cfg.BoolPtr)
+	isEqual(t, bool1, cfg.Bools[0])
+	isEqual(t, bool2, cfg.Bools[1])
+	isEqual(t, &bool1, cfg.BoolPtrs[0])
+	isEqual(t, &bool2, cfg.BoolPtrs[1])
+
+	isEqual(t, int1, cfg.Int)
+	isEqual(t, &int1, cfg.IntPtr)
+	isEqual(t, int1, cfg.Ints[0])
+	isEqual(t, int2, cfg.Ints[1])
+	isEqual(t, &int1, cfg.IntPtrs[0])
+	isEqual(t, &int2, cfg.IntPtrs[1])
+
+	isEqual(t, int81, cfg.Int8)
+	isEqual(t, &int81, cfg.Int8Ptr)
+	isEqual(t, int81, cfg.Int8s[0])
+	isEqual(t, int82, cfg.Int8s[1])
+	isEqual(t, &int81, cfg.Int8Ptrs[0])
+	isEqual(t, &int82, cfg.Int8Ptrs[1])
+
+	isEqual(t, int161, cfg.Int16)
+	isEqual(t, &int161, cfg.Int16Ptr)
+	isEqual(t, int161, cfg.Int16s[0])
+	isEqual(t, int162, cfg.Int16s[1])
+	isEqual(t, &int161, cfg.Int16Ptrs[0])
+	isEqual(t, &int162, cfg.Int16Ptrs[1])
+
+	isEqual(t, int321, cfg.Int32)
+	isEqual(t, &int321, cfg.Int32Ptr)
+	isEqual(t, int321, cfg.Int32s[0])
+	isEqual(t, int322, cfg.Int32s[1])
+	isEqual(t, &int321, cfg.Int32Ptrs[0])
+	isEqual(t, &int322, cfg.Int32Ptrs[1])
+
+	isEqual(t, int641, cfg.Int64)
+	isEqual(t, &int641, cfg.Int64Ptr)
+	isEqual(t, int641, cfg.Int64s[0])
+	isEqual(t, int642, cfg.Int64s[1])
+	isEqual(t, &int641, cfg.Int64Ptrs[0])
+	isEqual(t, &int642, cfg.Int64Ptrs[1])
+
+	isEqual(t, uint1, cfg.Uint)
+	isEqual(t, &uint1, cfg.UintPtr)
+	isEqual(t, uint1, cfg.Uints[0])
+	isEqual(t, uint2, cfg.Uints[1])
+	isEqual(t, &uint1, cfg.UintPtrs[0])
+	isEqual(t, &uint2, cfg.UintPtrs[1])
+
+	isEqual(t, uint81, cfg.Uint8)
+	isEqual(t, &uint81, cfg.Uint8Ptr)
+	isEqual(t, uint81, cfg.Uint8s[0])
+	isEqual(t, uint82, cfg.Uint8s[1])
+	isEqual(t, &uint81, cfg.Uint8Ptrs[0])
+	isEqual(t, &uint82, cfg.Uint8Ptrs[1])
+
+	isEqual(t, uint161, cfg.Uint16)
+	isEqual(t, &uint161, cfg.Uint16Ptr)
+	isEqual(t, uint161, cfg.Uint16s[0])
+	isEqual(t, uint162, cfg.Uint16s[1])
+	isEqual(t, &uint161, cfg.Uint16Ptrs[0])
+	isEqual(t, &uint162, cfg.Uint16Ptrs[1])
+
+	isEqual(t, uint321, cfg.Uint32)
+	isEqual(t, &uint321, cfg.Uint32Ptr)
+	isEqual(t, uint321, cfg.Uint32s[0])
+	isEqual(t, uint322, cfg.Uint32s[1])
+	isEqual(t, &uint321, cfg.Uint32Ptrs[0])
+	isEqual(t, &uint322, cfg.Uint32Ptrs[1])
+
+	isEqual(t, uint641, cfg.Uint64)
+	isEqual(t, &uint641, cfg.Uint64Ptr)
+	isEqual(t, uint641, cfg.Uint64s[0])
+	isEqual(t, uint642, cfg.Uint64s[1])
+	isEqual(t, &uint641, cfg.Uint64Ptrs[0])
+	isEqual(t, &uint642, cfg.Uint64Ptrs[1])
+
+	isEqual(t, float321, cfg.Float32)
+	isEqual(t, &float321, cfg.Float32Ptr)
+	isEqual(t, float321, cfg.Float32s[0])
+	isEqual(t, float322, cfg.Float32s[1])
+	isEqual(t, &float321, cfg.Float32Ptrs[0])
+
+	isEqual(t, float641, cfg.Float64)
+	isEqual(t, &float641, cfg.Float64Ptr)
+	isEqual(t, float641, cfg.Float64s[0])
+	isEqual(t, float642, cfg.Float64s[1])
+	isEqual(t, &float641, cfg.Float64Ptrs[0])
+	isEqual(t, &float642, cfg.Float64Ptrs[1])
+
+	isEqual(t, duration1, cfg.Duration)
+	isEqual(t, &duration1, cfg.DurationPtr)
+	isEqual(t, duration1, cfg.Durations[0])
+	isEqual(t, duration2, cfg.Durations[1])
+	isEqual(t, &duration1, cfg.DurationPtrs[0])
+	isEqual(t, &duration2, cfg.DurationPtrs[1])
+
+	isEqual(t, *location1, cfg.Location)
+	isEqual(t, location1, cfg.LocationPtr)
+	isEqual(t, *location1, cfg.Locations[0])
+	isEqual(t, *location2, cfg.Locations[1])
+	isEqual(t, location1, cfg.LocationPtrs[0])
+	isEqual(t, location2, cfg.LocationPtrs[1])
+
+	isEqual(t, unmarshaler1, cfg.Unmarshaler)
+	isEqual(t, &unmarshaler1, cfg.UnmarshalerPtr)
+	isEqual(t, unmarshaler1, cfg.Unmarshalers[0])
+	isEqual(t, unmarshaler2, cfg.Unmarshalers[1])
+	isEqual(t, &unmarshaler1, cfg.UnmarshalerPtrs[0])
+	isEqual(t, &unmarshaler2, cfg.UnmarshalerPtrs[1])
+
+	isEqual(t, url1, cfg.URL.String())
+	isEqual(t, url1, cfg.URLPtr.String())
+	isEqual(t, url1, cfg.URLs[0].String())
+	isEqual(t, url2, cfg.URLs[1].String())
+	isEqual(t, url1, cfg.URLPtrs[0].String())
+	isEqual(t, url2, cfg.URLPtrs[1].String())
+
+	isEqual(t, "postgres://localhost:5432/db", cfg.StringWithDefault)
+	isEqual(t, nonDefinedStr, cfg.NonDefined.String)
+	isEqual(t, nonDefinedStr, cfg.NestedNonDefined.NonDefined.String)
+
+	isEqual(t, str1, cfg.CustomSeparator[0])
+	isEqual(t, str2, cfg.CustomSeparator[1])
+
+	isEqual(t, cfg.NotAnEnv, "")
+
+	isEqual(t, cfg.unexported, "")
+}
+
+func TestTextUnmarshalerError(t *testing.T) {
+	type config struct {
+		Unmarshaler unmarshaler `env:"UNMARSHALER"`
+	}
+	t.Setenv("UNMARSHALER", "invalid")
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Unmarshaler" of type "env.unmarshaler": time: invalid duration "invalid"`)
+	isTrue(t, errors.Is(err, ParseError{}))
+}
+
+func TestTextUnmarshalersError(t *testing.T) {
+	type config struct {
+		Unmarshalers []unmarshaler `env:"UNMARSHALERS"`
+	}
+	t.Setenv("UNMARSHALERS", "1s,invalid")
+	err := Parse(&config{})
+	isErrorWithMessage(t, err, `env: parse error on field "Unmarshalers" of type "[]env.unmarshaler": time: invalid duration "invalid"`)
+	isTrue(t, errors.Is(err, ParseError{}))
 }
 
 func TestSetenvAndTagOptsChain(t *testing.T) {
@@ -353,246 +646,6 @@ func TestParseWithOptionsRenamedPrefix(t *testing.T) {
 
 	isNoErr(t, Parse(cfg))
 	isEqual(t, "101", cfg.Foo.Str)
-}
-
-func TestParsesEnv(t *testing.T) {
-	tos := func(v interface{}) string {
-		return fmt.Sprintf("%v", v)
-	}
-
-	toss := func(v ...interface{}) string {
-		ss := []string{}
-		for _, s := range v {
-			ss = append(ss, tos(s))
-		}
-		return strings.Join(ss, ",")
-	}
-
-	str1 := "str1"
-	str2 := "str2"
-	t.Setenv("STRING", str1)
-	t.Setenv("STRINGS", toss(str1, str2))
-
-	bool1 := true
-	bool2 := false
-	t.Setenv("BOOL", tos(bool1))
-	t.Setenv("BOOLS", toss(bool1, bool2))
-
-	int1 := -1
-	int2 := 2
-	t.Setenv("INT", tos(int1))
-	t.Setenv("INTS", toss(int1, int2))
-
-	var int81 int8 = -2
-	var int82 int8 = 5
-	t.Setenv("INT8", tos(int81))
-	t.Setenv("INT8S", toss(int81, int82))
-
-	var int161 int16 = -24
-	var int162 int16 = 15
-	t.Setenv("INT16", tos(int161))
-	t.Setenv("INT16S", toss(int161, int162))
-
-	var int321 int32 = -14
-	var int322 int32 = 154
-	t.Setenv("INT32", tos(int321))
-	t.Setenv("INT32S", toss(int321, int322))
-
-	var int641 int64 = -12
-	var int642 int64 = 150
-	t.Setenv("INT64", tos(int641))
-	t.Setenv("INT64S", toss(int641, int642))
-
-	var uint1 uint = 1
-	var uint2 uint = 2
-	t.Setenv("UINT", tos(uint1))
-	t.Setenv("UINTS", toss(uint1, uint2))
-
-	var uint81 uint8 = 15
-	var uint82 uint8 = 51
-	t.Setenv("UINT8", tos(uint81))
-	t.Setenv("UINT8S", toss(uint81, uint82))
-
-	var uint161 uint16 = 532
-	var uint162 uint16 = 123
-	t.Setenv("UINT16", tos(uint161))
-	t.Setenv("UINT16S", toss(uint161, uint162))
-
-	var uint321 uint32 = 93
-	var uint322 uint32 = 14
-	t.Setenv("UINT32", tos(uint321))
-	t.Setenv("UINT32S", toss(uint321, uint322))
-
-	var uint641 uint64 = 5
-	var uint642 uint64 = 43
-	t.Setenv("UINT64", tos(uint641))
-	t.Setenv("UINT64S", toss(uint641, uint642))
-
-	var float321 float32 = 9.3
-	var float322 float32 = 1.1
-	t.Setenv("FLOAT32", tos(float321))
-	t.Setenv("FLOAT32S", toss(float321, float322))
-
-	float641 := 1.53
-	float642 := 0.5
-	t.Setenv("FLOAT64", tos(float641))
-	t.Setenv("FLOAT64S", toss(float641, float642))
-
-	duration1 := time.Second
-	duration2 := time.Second * 4
-	t.Setenv("DURATION", tos(duration1))
-	t.Setenv("DURATIONS", toss(duration1, duration2))
-
-	location1 := time.UTC
-	location2, errLoadLocation := time.LoadLocation("Europe/Berlin")
-	isNoErr(t, errLoadLocation)
-	t.Setenv("LOCATION", tos(location1))
-	t.Setenv("LOCATIONS", toss(location1, location2))
-
-	url1 := "https://goreleaser.com"
-	url2 := "https://caarlos0.dev"
-	t.Setenv("URL", tos(url1))
-	t.Setenv("URLS", toss(url1, url2))
-
-	t.Setenv("SEPSTRINGS", str1+":"+str2)
-
-	nonDefinedStr := "nonDefinedStr"
-	t.Setenv("NONDEFINED_STR", nonDefinedStr)
-	t.Setenv("PRF_NONDEFINED_STR", nonDefinedStr)
-
-	t.Setenv("FOO", str1)
-
-	cfg := Config{}
-	isNoErr(t, Parse(&cfg))
-
-	isEqual(t, str1, cfg.String)
-	isEqual(t, &str1, cfg.StringPtr)
-	isEqual(t, str1, cfg.Strings[0])
-	isEqual(t, str2, cfg.Strings[1])
-	isEqual(t, &str1, cfg.StringPtrs[0])
-	isEqual(t, &str2, cfg.StringPtrs[1])
-
-	isEqual(t, bool1, cfg.Bool)
-	isEqual(t, &bool1, cfg.BoolPtr)
-	isEqual(t, bool1, cfg.Bools[0])
-	isEqual(t, bool2, cfg.Bools[1])
-	isEqual(t, &bool1, cfg.BoolPtrs[0])
-	isEqual(t, &bool2, cfg.BoolPtrs[1])
-
-	isEqual(t, int1, cfg.Int)
-	isEqual(t, &int1, cfg.IntPtr)
-	isEqual(t, int1, cfg.Ints[0])
-	isEqual(t, int2, cfg.Ints[1])
-	isEqual(t, &int1, cfg.IntPtrs[0])
-	isEqual(t, &int2, cfg.IntPtrs[1])
-
-	isEqual(t, int81, cfg.Int8)
-	isEqual(t, &int81, cfg.Int8Ptr)
-	isEqual(t, int81, cfg.Int8s[0])
-	isEqual(t, int82, cfg.Int8s[1])
-	isEqual(t, &int81, cfg.Int8Ptrs[0])
-	isEqual(t, &int82, cfg.Int8Ptrs[1])
-
-	isEqual(t, int161, cfg.Int16)
-	isEqual(t, &int161, cfg.Int16Ptr)
-	isEqual(t, int161, cfg.Int16s[0])
-	isEqual(t, int162, cfg.Int16s[1])
-	isEqual(t, &int161, cfg.Int16Ptrs[0])
-	isEqual(t, &int162, cfg.Int16Ptrs[1])
-
-	isEqual(t, int321, cfg.Int32)
-	isEqual(t, &int321, cfg.Int32Ptr)
-	isEqual(t, int321, cfg.Int32s[0])
-	isEqual(t, int322, cfg.Int32s[1])
-	isEqual(t, &int321, cfg.Int32Ptrs[0])
-	isEqual(t, &int322, cfg.Int32Ptrs[1])
-
-	isEqual(t, int641, cfg.Int64)
-	isEqual(t, &int641, cfg.Int64Ptr)
-	isEqual(t, int641, cfg.Int64s[0])
-	isEqual(t, int642, cfg.Int64s[1])
-	isEqual(t, &int641, cfg.Int64Ptrs[0])
-	isEqual(t, &int642, cfg.Int64Ptrs[1])
-
-	isEqual(t, uint1, cfg.Uint)
-	isEqual(t, &uint1, cfg.UintPtr)
-	isEqual(t, uint1, cfg.Uints[0])
-	isEqual(t, uint2, cfg.Uints[1])
-	isEqual(t, &uint1, cfg.UintPtrs[0])
-	isEqual(t, &uint2, cfg.UintPtrs[1])
-
-	isEqual(t, uint81, cfg.Uint8)
-	isEqual(t, &uint81, cfg.Uint8Ptr)
-	isEqual(t, uint81, cfg.Uint8s[0])
-	isEqual(t, uint82, cfg.Uint8s[1])
-	isEqual(t, &uint81, cfg.Uint8Ptrs[0])
-	isEqual(t, &uint82, cfg.Uint8Ptrs[1])
-
-	isEqual(t, uint161, cfg.Uint16)
-	isEqual(t, &uint161, cfg.Uint16Ptr)
-	isEqual(t, uint161, cfg.Uint16s[0])
-	isEqual(t, uint162, cfg.Uint16s[1])
-	isEqual(t, &uint161, cfg.Uint16Ptrs[0])
-	isEqual(t, &uint162, cfg.Uint16Ptrs[1])
-
-	isEqual(t, uint321, cfg.Uint32)
-	isEqual(t, &uint321, cfg.Uint32Ptr)
-	isEqual(t, uint321, cfg.Uint32s[0])
-	isEqual(t, uint322, cfg.Uint32s[1])
-	isEqual(t, &uint321, cfg.Uint32Ptrs[0])
-	isEqual(t, &uint322, cfg.Uint32Ptrs[1])
-
-	isEqual(t, uint641, cfg.Uint64)
-	isEqual(t, &uint641, cfg.Uint64Ptr)
-	isEqual(t, uint641, cfg.Uint64s[0])
-	isEqual(t, uint642, cfg.Uint64s[1])
-	isEqual(t, &uint641, cfg.Uint64Ptrs[0])
-	isEqual(t, &uint642, cfg.Uint64Ptrs[1])
-
-	isEqual(t, float321, cfg.Float32)
-	isEqual(t, &float321, cfg.Float32Ptr)
-	isEqual(t, float321, cfg.Float32s[0])
-	isEqual(t, float322, cfg.Float32s[1])
-	isEqual(t, &float321, cfg.Float32Ptrs[0])
-
-	isEqual(t, float641, cfg.Float64)
-	isEqual(t, &float641, cfg.Float64Ptr)
-	isEqual(t, float641, cfg.Float64s[0])
-	isEqual(t, float642, cfg.Float64s[1])
-	isEqual(t, &float641, cfg.Float64Ptrs[0])
-	isEqual(t, &float642, cfg.Float64Ptrs[1])
-
-	isEqual(t, duration1, cfg.Duration)
-	isEqual(t, &duration1, cfg.DurationPtr)
-	isEqual(t, duration1, cfg.Durations[0])
-	isEqual(t, duration2, cfg.Durations[1])
-	isEqual(t, &duration1, cfg.DurationPtrs[0])
-	isEqual(t, &duration2, cfg.DurationPtrs[1])
-
-	isEqual(t, *location1, cfg.Location)
-	isEqual(t, location1, cfg.LocationPtr)
-	isEqual(t, *location1, cfg.Locations[0])
-	isEqual(t, *location2, cfg.Locations[1])
-	isEqual(t, location1, cfg.LocationPtrs[0])
-	isEqual(t, location2, cfg.LocationPtrs[1])
-
-	isEqual(t, url1, cfg.URL.String())
-	isEqual(t, url1, cfg.URLPtr.String())
-	isEqual(t, url1, cfg.URLs[0].String())
-	isEqual(t, url2, cfg.URLs[1].String())
-	isEqual(t, url1, cfg.URLPtrs[0].String())
-	isEqual(t, url2, cfg.URLPtrs[1].String())
-
-	isEqual(t, "postgres://localhost:5432/db", cfg.StringWithDefault)
-	isEqual(t, nonDefinedStr, cfg.NonDefined.String)
-	isEqual(t, nonDefinedStr, cfg.NestedNonDefined.NonDefined.String)
-
-	isEqual(t, str1, cfg.CustomSeparator[0])
-	isEqual(t, str2, cfg.CustomSeparator[1])
-
-	isEqual(t, cfg.NotAnEnv, "")
-
-	isEqual(t, cfg.unexported, "")
 }
 
 func TestInvalidBool(t *testing.T) {
@@ -1865,6 +1918,112 @@ func TestIssue339(t *testing.T) {
 
 		isEqual(t, &newValue, cfg.StringPtr)
 	})
+}
+
+type Issue308 struct {
+	Inner Issue308Map `env:"A_MAP"`
+}
+
+type Issue308Map map[string][]string
+
+func (rc *Issue308Map) UnmarshalText(b []byte) error {
+	m := map[string][]string{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	*rc = Issue308Map(m)
+	return nil
+}
+
+func TestIssue308(t *testing.T) {
+	t.Setenv("A_MAP", `{"FOO":["BAR", "ZAZ"]}`)
+
+	cfg := Issue308{}
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, Issue308Map{"FOO": []string{"BAR", "ZAZ"}}, cfg.Inner)
+}
+
+type Password []byte
+
+func (p *Password) UnmarshalText(text []byte) error {
+	out, err := base64.StdEncoding.DecodeString(string(text))
+	if err != nil {
+		return err
+	}
+	*p = out
+	return nil
+}
+
+type UsernameAndPassword struct {
+	Username string    `env:"USER"`
+	Password *Password `env:"PWD"`
+}
+
+func TestBase64Password(t *testing.T) {
+	t.Setenv("USER", "admin")
+	t.Setenv("PWD", base64.StdEncoding.EncodeToString([]byte("admin123")))
+	var c UsernameAndPassword
+	isNoErr(t, Parse(&c))
+	isEqual(t, "admin", c.Username)
+	isEqual(t, "admin123", string(*c.Password))
+}
+
+type LogLevel int8
+
+func (l *LogLevel) UnmarshalText(text []byte) error {
+	txt := string(text)
+	switch txt {
+	case "debug":
+		*l = DebugLevel
+	case "info":
+		*l = InfoLevel
+	default:
+		return fmt.Errorf("unknown level: %q", txt)
+	}
+
+	return nil
+}
+
+const (
+	DebugLevel LogLevel = iota - 1
+	InfoLevel
+)
+
+func TestPrecedenceUnmarshalText(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("LOG_LEVELS", "debug,info")
+
+	type config struct {
+		LogLevel  LogLevel   `env:"LOG_LEVEL"`
+		LogLevels []LogLevel `env:"LOG_LEVELS"`
+	}
+	var cfg config
+
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, DebugLevel, cfg.LogLevel)
+	isEqual(t, []LogLevel{DebugLevel, InfoLevel}, cfg.LogLevels)
+}
+
+type MyTime time.Time
+
+func (t *MyTime) UnmarshalText(text []byte) error {
+	tt, err := time.Parse("2006-01-02", string(text))
+	*t = MyTime(tt)
+	return err
+}
+
+func TestCustomTimeParser(t *testing.T) {
+	type config struct {
+		SomeTime MyTime `env:"SOME_TIME"`
+	}
+
+	t.Setenv("SOME_TIME", "2021-05-06")
+
+	var cfg config
+	isNoErr(t, Parse(&cfg))
+	isEqual(t, 2021, time.Time(cfg.SomeTime).Year())
+	isEqual(t, time.Month(5), time.Time(cfg.SomeTime).Month())
+	isEqual(t, 6, time.Time(cfg.SomeTime).Day())
 }
 
 func isEqual(tb testing.TB, a, b interface{}) {

@@ -1,6 +1,7 @@
 package env
 
 import (
+	"encoding"
 	"errors"
 	"fmt"
 	"os"
@@ -228,6 +229,13 @@ func getOr(key, defaultValue string, defExists bool, env map[string]string) (val
 }
 
 func set(field reflect.Value, sf reflect.StructField, value string, funcMap map[reflect.Type]ParserFunc) error {
+	if tm := asTextUnmarshaler(field); tm != nil {
+		if err := tm.UnmarshalText([]byte(value)); err != nil {
+			return newParseError(sf, err)
+		}
+		return nil
+	}
+
 	typee := sf.Type
 	fieldee := field
 	if typee.Kind() == reflect.Ptr {
@@ -265,6 +273,10 @@ func handleSlice(field reflect.Value, value string, sf reflect.StructField, func
 	typee := sf.Type.Elem()
 	if typee.Kind() == reflect.Ptr {
 		typee = typee.Elem()
+	}
+
+	if _, ok := reflect.New(typee).Interface().(encoding.TextUnmarshaler); ok {
+		return parseTextUnmarshalers(field, parts, sf)
 	}
 
 	parserFunc, ok := getParserFunc(funcMap, typee)
@@ -354,4 +366,39 @@ func getParserFunc(funcMap map[reflect.Type]ParserFunc, typee reflect.Type) (Par
 		}
 	}
 	return parserFunc, ok
+}
+
+func asTextUnmarshaler(field reflect.Value) encoding.TextUnmarshaler {
+	if field.Kind() == reflect.Ptr {
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+	} else if field.CanAddr() {
+		field = field.Addr()
+	}
+
+	tm, ok := field.Interface().(encoding.TextUnmarshaler)
+	if !ok {
+		return nil
+	}
+	return tm
+}
+
+func parseTextUnmarshalers(field reflect.Value, data []string, sf reflect.StructField) error {
+	s := len(data)
+	elemType := field.Type().Elem()
+	slice := reflect.MakeSlice(reflect.SliceOf(elemType), s, s)
+	for i, v := range data {
+		sv := slice.Index(i)
+		tm := asTextUnmarshaler(sv)
+		if err := tm.UnmarshalText([]byte(v)); err != nil {
+			return newParseError(sf, err)
+		}
+		if sv.Kind() == reflect.Ptr {
+			slice.Index(i).Set(sv)
+		}
+	}
+
+	field.Set(slice)
+	return nil
 }
